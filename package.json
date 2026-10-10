@@ -1,0 +1,36 @@
+{
+  "name": "multipurpose-erp",
+  "version": "1.0.0",
+  "description": "Offline-First Multi-Vertical POS & ERP for Pharma, Kiryana, and Retail",
+  "main": "electron/main.js",
+  "scripts": {
+    "server": "node server/index.js",
+    "seed": "node server/seed.js",
+    "client": "vite",
+    "build": "vite build",
+    "dev": "concurrently \"node server/index.js\" \"vite\"",
+    "start": "concurrently \"node server/index.js\" \"electron .\"",
+    "electron": "electron ."
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "jsbarcode": "^3.12.3",
+    "jsonwebtoken": "^9.0.3",
+    "lucide-react": "^1.52.0",
+    "qrcode": "^1.5.4",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-react": "^6.1.2",
+    "autoprefixer": "^10.6.1",
+    "concurrently": "^10.0.5",
+    "electron": "^44.5.1",
+    "postcss": "^8.5.29",
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.3.3"
+  }
+}

@@ -1,0 +1,193 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    @apply font-sans antialiased select-none;
+  }
+}
+
+/* -------------------------------------------------------------
+   SKY BLUE BACKGROUND THEME ENGINE
+------------------------------------------------------------- */
+
+/* 1. Theme: Sky Blue Radiant (Default vibrant luminous atmosphere) */
+body.theme-sky-radiant,
+body:not([class*="theme-"]) {
+  background:
+    radial-gradient(ellipse 80% 50% at 20% -10%, rgba(56, 189, 248, 0.45), transparent 70%),
+    radial-gradient(ellipse 60% 50% at 90% 110%, rgba(14, 165, 233, 0.35), transparent 60%),
+    radial-gradient(circle at 50% 50%, #0369a1 0%, #0284c7 15%, #075985 40%, #0c4a6e 70%, #082f49 100%) fixed !important;
+  background-attachment: fixed !important;
+  color: #f0f9ff;
+}
+
+body.theme-sky-radiant #root,
+body:not([class*="theme-"]) #root {
+  background: transparent !important;
+}
+
+body.theme-sky-radiant .bg-slate-900,
+body:not([class*="theme-"]) .bg-slate-900 {
+  background-color: rgba(8, 47, 73, 0.52) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+}
+
+body.theme-sky-radiant .bg-slate-950,
+body:not([class*="theme-"]) .bg-slate-950 {
+  background-color: rgba(7, 36, 56, 0.78) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border-color: rgba(56, 189, 248, 0.25) !important;
+}
+
+body.theme-sky-radiant .bg-slate-950\/80,
+body.theme-sky-radiant .bg-slate-950\/60,
+body.theme-sky-radiant .bg-slate-950\/50,
+body:not([class*="theme-"]) .bg-slate-950\/80,
+body:not([class*="theme-"]) .bg-slate-950\/60,
+body:not([class*="theme-"]) .bg-slate-950\/50 {
+  background-color: rgba(12, 74, 110, 0.38) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+}
+
+body.theme-sky-radiant .bg-slate-900\/60,
+body.theme-sky-radiant .bg-slate-900\/80,
+body:not([class*="theme-"]) .bg-slate-900\/60,
+body:not([class*="theme-"]) .bg-slate-900\/80 {
+  background-color: rgba(14, 116, 144, 0.3) !important;
+}
+
+body.theme-sky-radiant .border-slate-800,
+body:not([class*="theme-"]) .border-slate-800 {
+  border-color: rgba(56, 189, 248, 0.22) !important;
+}
+
+body.theme-sky-radiant .border-slate-700,
+body.theme-sky-radiant .border-slate-700\/80,
+body:not([class*="theme-"]) .border-slate-700,
+body:not([class*="theme-"]) .border-slate-700\/80 {
+  border-color: rgba(56, 189, 248, 0.35) !important;
+}
+
+/* 2. Theme: Sky Blue Deep Azure (Ultra saturated oceanic sky blue) */
+body.theme-sky-deep {
+  background:
+    radial-gradient(ellipse 70% 50% at 50% 0%, rgba(14, 165, 233, 0.4), transparent 70%),
+    linear-gradient(135deg, #0284c7 0%, #0369a1 35%, #075985 65%, #0c4a6e 90%, #082f49 100%) fixed !important;
+  background-attachment: fixed !important;
+  color: #f0f9ff;
+}
+
+body.theme-sky-deep #root {
+  background: transparent !important;
+}
+
+body.theme-sky-deep .bg-slate-900 {
+  background-color: rgba(3, 105, 161, 0.45) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+}
+
+body.theme-sky-deep .bg-slate-950 {
+  background-color: rgba(7, 89, 133, 0.82) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+}
+
+body.theme-sky-deep .border-slate-800 {
+  border-color: rgba(125, 211, 252, 0.25) !important;
+}
+
+body.theme-sky-deep .border-slate-700 {
+  border-color: rgba(125, 211, 252, 0.38) !important;
+}
+
+/* 3. Theme: Sky Blue Daylight (Crisp sky-blue day mode) */
+body.theme-sky-light {
+  background:
+    radial-gradient(ellipse 80% 50% at 30% -10%, #ffffff, transparent 70%),
+    linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 30%, #bae6fd 65%, #7dd3fc 100%) fixed !important;
+  background-attachment: fixed !important;
+  color: #0f172a;
+}
+
+body.theme-sky-light #root {
+  background: transparent !important;
+}
+
+body.theme-sky-light .bg-slate-900 {
+  background-color: rgba(255, 255, 255, 0.75) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  color: #0f172a !important;
+}
+
+body.theme-sky-light .bg-slate-950 {
+  background-color: rgba(240, 249, 255, 0.92) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border-color: rgba(2, 132, 199, 0.25) !important;
+}
+
+body.theme-sky-light .text-white {
+  color: #0f172a !important;
+}
+
+body.theme-sky-light .text-slate-100,
+body.theme-sky-light .text-slate-200,
+body.theme-sky-light .text-slate-300 {
+  color: #1e293b !important;
+}
+
+body.theme-sky-light .text-slate-400 {
+  color: #475569 !important;
+}
+
+body.theme-sky-light .border-slate-800,
+body.theme-sky-light .border-slate-700 {
+  border-color: rgba(2, 132, 199, 0.22) !important;
+}
+
+/* 4. Theme: Midnight Slate (Original Dark Mode) */
+body.theme-midnight-slate {
+  background: #0f172a !important;
+  color: #f1f5f9;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(8, 47, 73, 0.5);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(56, 189, 248, 0.5);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(14, 165, 233, 0.8);
+}
+
+/* Print specific styles for Thermal 80mm and A4 */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #printable-receipt, #printable-receipt * {
+    visibility: visible;
+  }
+  #printable-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    background: white !important;
+    color: black !important;
+  }
+}
