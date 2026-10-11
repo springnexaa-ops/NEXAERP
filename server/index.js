@@ -91,4 +91,12 @@ const server = app.listen(PORT, () => {
   console.log(`Nexa ERP server listening on http://localhost:${PORT}`);
 });
 
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.warn(`[Port ${PORT} in use] An existing Nexa ERP server instance or daemon is already active on port ${PORT}. Continuing.`);
+  } else {
+    console.error('Nexa ERP server error:', err);
+  }
+});
+
 module.exports = { app, server };
