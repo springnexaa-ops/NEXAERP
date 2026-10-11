@@ -3,12 +3,41 @@ const fs = require('fs');
 const path = require('path');
 const bcrypt = require('bcryptjs');
 
-const dataDir = path.join(__dirname, '..', 'data');
+// Resolve persistent writable data directory across Node.js server and packaged Electron .exe
+let dataDir;
+try {
+  if (process.versions && process.versions.electron) {
+    const electron = require('electron');
+    const electronApp = electron.app || (electron.remote && electron.remote.app);
+    if (electronApp) {
+      const baseDir = process.env.PORTABLE_EXECUTABLE_DIR || electronApp.getPath('userData');
+      dataDir = path.join(baseDir, 'nexa_data');
+    }
+  }
+} catch (e) {
+  // Ignore and fallback
+}
+
+if (!dataDir) {
+  dataDir = process.env.NEXA_DATA_DIR || path.join(__dirname, '..', 'data');
+}
+
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
 
 const dbPath = path.join(dataDir, 'erp.sqlite');
+
+// Automatically copy seed/initial db template if running in a fresh userData folder
+const templateDbPath = path.join(__dirname, '..', 'data', 'erp.sqlite');
+if (dataDir !== path.join(__dirname, '..', 'data') && !fs.existsSync(dbPath) && fs.existsSync(templateDbPath)) {
+  try {
+    fs.copyFileSync(templateDbPath, dbPath);
+  } catch (err) {
+    console.warn('Could not copy template database:', err.message);
+  }
+}
+
 const db = new DatabaseSync(dbPath);
 
 // Initialize Complete Enterprise ERP Tables

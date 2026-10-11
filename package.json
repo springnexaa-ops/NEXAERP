@@ -10,7 +10,38 @@
     "build": "vite build",
     "dev": "concurrently \"node server/index.js\" \"vite\"",
     "start": "concurrently \"node server/index.js\" \"electron .\"",
-    "electron": "electron ."
+    "electron": "electron .",
+    "dist": "vite build && electron-builder --win",
+    "dist:portable": "vite build && electron-builder --win portable",
+    "dist:dir": "vite build && electron-builder --win --dir"
+  },
+  "build": {
+    "appId": "com.springnexa.nexaerp",
+    "productName": "NEXA ERP",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "server/**/*",
+      "electron/**/*",
+      "data/erp.sqlite",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "NEXA ERP"
+    }
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -29,6 +60,7 @@
     "autoprefixer": "^10.6.1",
     "concurrently": "^10.0.5",
     "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
     "postcss": "^8.5.29",
     "tailwindcss": "^4.3.3",
     "vite": "^8.3.3"
