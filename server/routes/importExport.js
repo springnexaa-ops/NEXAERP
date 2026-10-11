@@ -2824,6 +2824,16 @@ router.delete('/ports/:id', (req, res) => {
 // 11. TRUE LANDED COST ENGINE (FINANCE & BILLING)
 // ========================================================
 
+// Strict RBAC Role Validator: Only authenticated Super Admins can simulate other roles!
+function getEffectiveUserRole(req) {
+  const authRole = req.user?.role;
+  const isAdmin = authRole === 'super_admin' || authRole === 'admin' || authRole === 'store_owner';
+  if (isAdmin && req.headers['x-user-role']) {
+    return req.headers['x-user-role'];
+  }
+  return authRole || 'super_admin';
+}
+
 // 11.1 List Landed Cost Calculations (RBAC Protected)
 router.get('/landed-costs', (req, res) => {
   try {
@@ -2831,7 +2841,7 @@ router.get('/landed-costs', (req, res) => {
     if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
 
     // RBAC: Check if role is CHA partner
-    const userRole = (req.user && req.user.role) || req.headers['x-user-role'];
+    const userRole = getEffectiveUserRole(req);
     if (userRole === 'cha_agent') {
       return res.status(403).json({
         error: 'RBAC_ACCESS_DENIED',
@@ -2880,7 +2890,7 @@ router.post('/landed-costs', (req, res) => {
     const tenantId = req.tenantId;
     if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
 
-    const userRole = (req.user && req.user.role) || req.headers['x-user-role'];
+    const userRole = getEffectiveUserRole(req);
     if (userRole === 'cha_agent') {
       return res.status(403).json({ error: 'RBAC_ACCESS_DENIED: Financial modifications require Accountant or Super Admin privileges' });
     }
@@ -2990,7 +3000,7 @@ router.get('/fx-ledger', (req, res) => {
     const tenantId = req.tenantId;
     if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
 
-    const userRole = (req.user && req.user.role) || req.headers['x-user-role'];
+    const userRole = getEffectiveUserRole(req);
     if (userRole === 'cha_agent') {
       return res.status(403).json({ error: 'RBAC_ACCESS_DENIED: Financial FX data is restricted to Accountants only.' });
     }
@@ -3296,6 +3306,11 @@ router.get('/users', (req, res) => {
     const tenantId = req.tenantId;
     if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
 
+    const effectiveRole = getEffectiveUserRole(req);
+    if (effectiveRole !== 'super_admin' && effectiveRole !== 'admin') {
+      return res.status(403).json({ error: 'RBAC_ACCESS_DENIED: User provisioning requires Super Admin privileges.' });
+    }
+
     const users = db.prepare(`
       SELECT id, name, email, role, pin_code, status, last_login_at, created_at
       FROM users
@@ -3313,6 +3328,11 @@ router.post('/users', (req, res) => {
   try {
     const tenantId = req.tenantId;
     if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
+
+    const effectiveRole = getEffectiveUserRole(req);
+    if (effectiveRole !== 'super_admin' && effectiveRole !== 'admin') {
+      return res.status(403).json({ error: 'RBAC_ACCESS_DENIED: User provisioning requires Super Admin privileges.' });
+    }
 
     const { name, email, role = 'logistics', password = 'Password@123', pin_code = '1234' } = req.body;
 

@@ -53,7 +53,8 @@ import {
   Crown,
   ShieldAlert,
   Sliders,
-  Scale
+  Scale,
+  Lock
 } from 'lucide-react';
 
 const PERSONAS = [
@@ -94,21 +95,56 @@ const PERSONAS = [
 export function ImportExportScreen() {
   const { currentTenant, currencySymbol, showToast, user } = useApp();
 
-  // Active Persona State for RBAC Simulation
-  const [activePersona, setActivePersona] = useState(() => {
-    if (user?.role === 'cha_agent') return 'cha_agent';
-    if (user?.role === 'accountant') return 'accountant';
-    if (user?.role === 'logistics') return 'logistics';
-    return 'super_admin';
-  });
+  // Strict Administrator Check: Only Admins can switch personas or access system provisioning
+  const isAdmin = user?.role === 'super_admin' || user?.role === 'admin' || user?.role === 'store_owner';
 
-  // Default to Landed Cost or Containers or CHA portal based on persona
+  // Real Authenticated User Persona
+  const userPersona = user?.role === 'cha_agent' ? 'cha_agent'
+    : user?.role === 'accountant' ? 'accountant'
+    : user?.role === 'logistics' ? 'logistics'
+    : 'super_admin';
+
+  // Active Persona State: Non-admins are strictly locked into userPersona
+  const [activePersona, setActivePersona] = useState(userPersona);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setActivePersona(userPersona);
+    }
+  }, [isAdmin, userPersona]);
+
+  // Strict Tab Permission Policy
+  const isAllowedTab = (tabId) => {
+    if (activePersona === 'super_admin') return true;
+    if (activePersona === 'cha_agent') {
+      return ['checklists', 'cha', 'dms', 'ports', 'licenses', 'parties', 'fssai_label', 'logs'].includes(tabId);
+    }
+    if (activePersona === 'accountant') {
+      return ['landed_cost', 'billing', 'profit', 'receivables', 'gst', 'parties', 'dms', 'checklists', 'ports', 'licenses', 'exim', 'logs'].includes(tabId);
+    }
+    if (activePersona === 'logistics') {
+      return ['containers', 'exim', 'parties', 'eway', 'fssai_label', 'barcode', 'dms', 'ports', 'licenses', 'import', 'export', 'logs'].includes(tabId);
+    }
+    return false;
+  };
+
+  // Initial activeSubTab based on persona
   const [activeSubTab, setActiveSubTab] = useState(() => {
-    if (user?.role === 'cha_agent') return 'checklists';
-    if (user?.role === 'accountant') return 'landed_cost';
-    if (user?.role === 'logistics') return 'containers';
+    if (userPersona === 'cha_agent') return 'checklists';
+    if (userPersona === 'accountant') return 'landed_cost';
+    if (userPersona === 'logistics') return 'containers';
     return 'landed_cost';
   });
+
+  // Guard: Automatically redirect activeSubTab if disallowed for activePersona
+  useEffect(() => {
+    if (!isAllowedTab(activeSubTab)) {
+      if (activePersona === 'cha_agent') setActiveSubTab('checklists');
+      else if (activePersona === 'accountant') setActiveSubTab('landed_cost');
+      else if (activePersona === 'logistics') setActiveSubTab('containers');
+      else setActiveSubTab('landed_cost');
+    }
+  }, [activePersona, activeSubTab]);
 
   const [overview, setOverview] = useState(null);
   const [loadingOverview, setLoadingOverview] = useState(true);
@@ -129,28 +165,24 @@ export function ImportExportScreen() {
     }
   };
 
-  // Handle Persona Switching with automatic tab adjustment
+  // Handle Persona Switching: STRICTLY ALLOWED FOR ADMIN ONLY
   const handlePersonaChange = (newPersona) => {
+    if (!isAdmin) {
+      showToast('Strict Security Enforcement: Role switching is strictly prohibited for non-administrators.', 'error');
+      return;
+    }
     setActivePersona(newPersona);
     if (newPersona === 'cha_agent') {
-      const allowedChaTabs = ['checklists', 'cha', 'dms', 'ports', 'licenses', 'parties', 'fssai_label'];
-      if (!allowedChaTabs.includes(activeSubTab)) {
-        setActiveSubTab('checklists');
-      }
-      showToast('Switched to Customs House Agent (CHA Partner) — Financial Ledgers Stripped', 'info');
+      setActiveSubTab('checklists');
+      showToast('Simulating Customs House Agent (CHA Partner) — Financial Ledgers Stripped', 'info');
     } else if (newPersona === 'accountant') {
-      const allowedAccountsTabs = ['landed_cost', 'billing', 'parties', 'profit', 'receivables', 'gst', 'dms', 'checklists', 'ports'];
-      if (!allowedAccountsTabs.includes(activeSubTab)) {
-        setActiveSubTab('landed_cost');
-      }
-      showToast('Switched to Accounts Dept — True Landed Cost & FX Ledger Active', 'info');
+      setActiveSubTab('landed_cost');
+      showToast('Simulating Accounts Dept — True Landed Cost & FX Ledger Active', 'info');
     } else if (newPersona === 'logistics') {
-      const allowedLogisticsTabs = ['containers', 'exim', 'parties', 'eway', 'fssai_label', 'barcode', 'dms', 'ports', 'import', 'export'];
-      if (!allowedLogisticsTabs.includes(activeSubTab)) {
-        setActiveSubTab('containers');
-      }
-      showToast('Switched to Logistics / Ops — Container Milestone Matrix & Demurrage Active', 'info');
+      setActiveSubTab('containers');
+      showToast('Simulating Logistics / Ops — Container Milestone Matrix Active', 'info');
     } else {
+      setActiveSubTab('landed_cost');
       showToast('Switched to Super Admin — Full Platform Access Granted', 'success');
     }
   };
@@ -207,74 +239,149 @@ export function ImportExportScreen() {
         )}
       </div>
 
-      {/* 2. Interactive RBAC Persona Switcher (Presentation & Access Tier) */}
-      <div className="bg-slate-950/90 rounded-3xl border border-slate-800 p-4 shadow-xl space-y-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-850 pb-2.5">
-          <div className="flex items-center space-x-2">
-            <Sliders className="w-4 h-4 text-sky-400" />
-            <span className="text-xs font-bold text-white uppercase tracking-wider">
-              Presentation & Access Tier (RBAC Persona Switcher)
-            </span>
+      {/* 2. Access Tier RBAC Status Banner (Admin Switcher vs. Non-Admin Locked View) */}
+      {isAdmin ? (
+        /* ADMIN SIMULATION & AUDIT SWITCHER (Only allowed for Super Admin / Admin) */
+        <div className="bg-slate-950/90 rounded-3xl border border-amber-500/30 p-4 shadow-xl space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+            <div className="flex items-center space-x-2">
+              <span className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                <Crown className="w-4 h-4" />
+              </span>
+              <div>
+                <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  Presentation & Access Tier (Admin Persona Switcher)
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    Administrator Only
+                  </span>
+                </span>
+                <p className="text-[11px] text-slate-400">
+                  Simulate system presentation and verify RBAC security barriers across organizational tiers
+                </p>
+              </div>
+            </div>
+
+            {/* Active Security Policy Pill */}
+            {isCha ? (
+              <div className="inline-flex items-center space-x-1.5 bg-rose-500/10 border border-rose-500/30 text-rose-400 px-3 py-1 rounded-full text-[11px] font-mono font-bold">
+                <ShieldAlert className="w-3.5 h-3.5" />
+                <span>SIMULATING CHA: Financial Ledgers & Margins Stripped</span>
+              </div>
+            ) : isAccountant ? (
+              <div className="inline-flex items-center space-x-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 px-3 py-1 rounded-full text-[11px] font-mono font-bold">
+                <Calculator className="w-3.5 h-3.5" />
+                <span>SIMULATING ACCOUNTS: Landed Cost & FX Engine Active</span>
+              </div>
+            ) : isLogistics ? (
+              <div className="inline-flex items-center space-x-1.5 bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 px-3 py-1 rounded-full text-[11px] font-mono font-bold">
+                <Truck className="w-3.5 h-3.5" />
+                <span>SIMULATING LOGISTICS: Milestone Matrix & Demurrage Live</span>
+              </div>
+            ) : (
+              <div className="inline-flex items-center space-x-1.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 px-3 py-1 rounded-full text-[11px] font-mono font-bold">
+                <Crown className="w-3.5 h-3.5" />
+                <span>SUPER ADMIN: System-Wide Configuration & Audits</span>
+              </div>
+            )}
           </div>
 
-          {/* Active Security Policy Pill */}
-          {isCha ? (
-            <div className="inline-flex items-center space-x-1.5 bg-rose-500/10 border border-rose-500/30 text-rose-400 px-3 py-1 rounded-full text-[11px] font-mono font-bold">
-              <ShieldAlert className="w-3.5 h-3.5" />
-              <span>RBAC BARRIER: Financial Ledgers & Margins Stripped</span>
-            </div>
-          ) : isAccountant ? (
-            <div className="inline-flex items-center space-x-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 px-3 py-1 rounded-full text-[11px] font-mono font-bold">
-              <Calculator className="w-3.5 h-3.5" />
-              <span>ACCOUNTS PRIVILEGE: Landed Cost & FX Engine Active</span>
-            </div>
-          ) : isLogistics ? (
-            <div className="inline-flex items-center space-x-1.5 bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 px-3 py-1 rounded-full text-[11px] font-mono font-bold">
-              <Truck className="w-3.5 h-3.5" />
-              <span>LOGISTICS PRIVILEGE: Milestone Matrix & Demurrage Live</span>
-            </div>
-          ) : (
-            <div className="inline-flex items-center space-x-1.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 px-3 py-1 rounded-full text-[11px] font-mono font-bold">
-              <Crown className="w-3.5 h-3.5" />
-              <span>SUPER ADMIN: System-Wide Configuration & Audits</span>
-            </div>
-          )}
+          {/* Persona Select Buttons (Visible ONLY to Admin) */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+            {PERSONAS.map(p => {
+              const Icon = p.icon;
+              const isSelected = activePersona === p.id;
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => handlePersonaChange(p.id)}
+                  className={`p-3 rounded-2xl border text-left transition flex items-center space-x-3 ${
+                    isSelected
+                      ? `${p.ring} shadow-lg ring-1`
+                      : 'bg-slate-900/60 border-slate-800/80 text-slate-400 hover:text-white hover:bg-slate-850'
+                  }`}
+                >
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                    isSelected ? 'bg-white/10' : 'bg-slate-800'
+                  }`}>
+                    <Icon className="w-4 h-4" />
+                  </div>
+                  <div className="truncate">
+                    <div className="font-bold text-xs truncate text-white">{p.label}</div>
+                    <div className="text-[10px] text-slate-400 truncate">{p.subtext}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </div>
+      ) : (
+        /* NON-ADMIN: STRICT ROLE-BASED ACCESS CONTROL (SWITCHER LOCKED) */
+        <div className="bg-slate-950/90 rounded-3xl border border-slate-800 p-4 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center space-x-3.5">
+            <div className={`w-12 h-12 rounded-2xl border flex items-center justify-center shrink-0 shadow-lg ${
+              isCha
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 shadow-emerald-500/10'
+                : isAccountant
+                ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-400 shadow-indigo-500/10'
+                : 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400 shadow-cyan-500/10'
+            }`}>
+              <Lock className="w-6 h-6" />
+            </div>
 
-        {/* Persona Select Buttons */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
-          {PERSONAS.map(p => {
-            const Icon = p.icon;
-            const isSelected = activePersona === p.id;
-            return (
-              <button
-                key={p.id}
-                onClick={() => handlePersonaChange(p.id)}
-                className={`p-3 rounded-2xl border text-left transition flex items-center space-x-3 ${
-                  isSelected
-                    ? `${p.ring} shadow-lg ring-1`
-                    : 'bg-slate-900/60 border-slate-800/80 text-slate-400 hover:text-white hover:bg-slate-850'
-                }`}
-              >
-                <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-                  isSelected ? 'bg-white/10' : 'bg-slate-800'
-                }`}>
-                  <Icon className="w-4 h-4" />
-                </div>
-                <div className="truncate">
-                  <div className="font-bold text-xs truncate text-white">{p.label}</div>
-                  <div className="text-[10px] text-slate-400 truncate">{p.subtext}</div>
-                </div>
-              </button>
-            );
-          })}
+            <div>
+              <div className="flex items-center space-x-2">
+                <span className="text-[10px] font-mono uppercase font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-lg border border-emerald-500/20">
+                  Strict Role-Based Access Control (RBAC)
+                </span>
+                <span className="text-[10px] font-mono text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                  Role: {user?.role || 'Assigned Tier'}
+                </span>
+              </div>
+              <h3 className="text-sm font-bold text-white mt-1 flex items-center gap-2">
+                <span>Assigned Tier:</span>
+                <span className="text-sky-400 font-extrabold">
+                  {isCha
+                    ? 'Customs House Agent (CHA Partner)'
+                    : isAccountant
+                    ? 'Accounts Department'
+                    : isLogistics
+                    ? 'Logistics / Operations Department'
+                    : (user?.name || 'Authorized User')}
+                </span>
+              </h3>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Logged in as <strong>{user?.name || user?.email}</strong>. Persona switching is locked to Administrators only.
+              </p>
+            </div>
+          </div>
+
+          <div className="shrink-0">
+            {isCha && (
+              <div className="inline-flex items-center space-x-2 bg-rose-500/10 border border-rose-500/30 text-rose-300 px-3.5 py-2 rounded-2xl text-xs font-mono font-bold">
+                <ShieldAlert className="w-4 h-4 text-rose-400" />
+                <span>RBAC BARRIER: Financial Ledgers & Margins Stripped</span>
+              </div>
+            )}
+            {isAccountant && (
+              <div className="inline-flex items-center space-x-2 bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 px-3.5 py-2 rounded-2xl text-xs font-mono font-bold">
+                <Calculator className="w-4 h-4 text-indigo-400" />
+                <span>ACCOUNTS PRIVILEGE: True Landed Cost & FX Active</span>
+              </div>
+            )}
+            {isLogistics && (
+              <div className="inline-flex items-center space-x-2 bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 px-3.5 py-2 rounded-2xl text-xs font-mono font-bold">
+                <Truck className="w-4 h-4 text-cyan-400" />
+                <span>LOGISTICS PRIVILEGE: Container Matrix Live</span>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* 3. Navigation Tabs Filtered by Persona RBAC Protocol */}
       <div className="flex items-center space-x-2 border-b border-slate-800 pb-2 overflow-x-auto select-none no-scrollbar">
-        {/* TAB 1: True Landed Cost Engine (Accounts & Super Admin only) */}
-        {!isCha && (
+        {/* TAB 1: True Landed Cost Engine */}
+        {isAllowedTab('landed_cost') && (
           <button
             onClick={() => setActiveSubTab('landed_cost')}
             className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
@@ -288,8 +395,8 @@ export function ImportExportScreen() {
           </button>
         )}
 
-        {/* TAB 2: Container Tracking & Demurrage Matrix (Logistics & Super Admin) */}
-        {!isCha && (
+        {/* TAB 2: Container Tracking & Demurrage Matrix */}
+        {isAllowedTab('containers') && (
           <button
             onClick={() => setActiveSubTab('containers')}
             className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
@@ -303,212 +410,248 @@ export function ImportExportScreen() {
           </button>
         )}
 
-        {/* TAB 3: Pre-Filing Checklist Verification (CHA & Super Admin & Accounts) */}
-        <button
-          onClick={() => setActiveSubTab('checklists')}
-          className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
-            activeSubTab === 'checklists'
-              ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-600/30'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-          }`}
-        >
-          <FileCheck2 className="w-4 h-4 text-emerald-300" />
-          <span>Pre-Filing Checklists</span>
-        </button>
+        {/* TAB 3: Pre-Filing Checklist Verification */}
+        {isAllowedTab('checklists') && (
+          <button
+            onClick={() => setActiveSubTab('checklists')}
+            className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
+              activeSubTab === 'checklists'
+                ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-600/30'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <FileCheck2 className="w-4 h-4 text-emerald-300" />
+            <span>Pre-Filing Checklists</span>
+          </button>
+        )}
 
         {/* TAB 4: Secure Document Management System (DMS) */}
-        <button
-          onClick={() => setActiveSubTab('dms')}
-          className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
-            activeSubTab === 'dms'
-              ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-md shadow-blue-600/30'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-          }`}
-        >
-          <FolderOpen className="w-4 h-4 text-blue-300" />
-          <span>DMS Document Vault</span>
-        </button>
+        {isAllowedTab('dms') && (
+          <button
+            onClick={() => setActiveSubTab('dms')}
+            className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
+              activeSubTab === 'dms'
+                ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-md shadow-blue-600/30'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <FolderOpen className="w-4 h-4 text-blue-300" />
+            <span>DMS Document Vault</span>
+          </button>
+        )}
 
         {/* TAB 5: CHA Customs Portal */}
-        <button
-          onClick={() => setActiveSubTab('cha')}
-          className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
-            activeSubTab === 'cha'
-              ? 'bg-gradient-to-r from-sky-500 to-indigo-600 text-white shadow-md shadow-sky-600/30'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-          }`}
-        >
-          <Anchor className="w-4 h-4 text-sky-300" />
-          <span>CHA Customs Clearance Desk</span>
-        </button>
+        {isAllowedTab('cha') && (
+          <button
+            onClick={() => setActiveSubTab('cha')}
+            className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
+              activeSubTab === 'cha'
+                ? 'bg-gradient-to-r from-sky-500 to-indigo-600 text-white shadow-md shadow-sky-600/30'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Anchor className="w-4 h-4 text-sky-300" />
+            <span>CHA Customs Clearance Desk</span>
+          </button>
+        )}
 
         {/* TAB 6: Customs Ports & ICDs Directory */}
-        <button
-          onClick={() => setActiveSubTab('ports')}
-          className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
-            activeSubTab === 'ports'
-              ? 'bg-gradient-to-r from-sky-500 to-cyan-600 text-white shadow-md shadow-sky-600/30'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-          }`}
-        >
-          <Ship className="w-4 h-4 text-sky-300" />
-          <span>Customs Ports & ICDs</span>
-        </button>
+        {isAllowedTab('ports') && (
+          <button
+            onClick={() => setActiveSubTab('ports')}
+            className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
+              activeSubTab === 'ports'
+                ? 'bg-gradient-to-r from-sky-500 to-cyan-600 text-white shadow-md shadow-sky-600/30'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Ship className="w-4 h-4 text-sky-300" />
+            <span>Customs Ports & ICDs</span>
+          </button>
+        )}
 
         {/* TAB 7: DGFT, RCMC & FSSAI Licenses */}
-        <button
-          onClick={() => setActiveSubTab('licenses')}
-          className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
-            activeSubTab === 'licenses'
-              ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-600/30'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-          }`}
-        >
-          <Award className="w-4 h-4 text-emerald-300" />
-          <span>DGFT, RCMC & FSSAI</span>
-        </button>
+        {isAllowedTab('licenses') && (
+          <button
+            onClick={() => setActiveSubTab('licenses')}
+            className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
+              activeSubTab === 'licenses'
+                ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-600/30'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Award className="w-4 h-4 text-emerald-300" />
+            <span>DGFT, RCMC & FSSAI</span>
+          </button>
+        )}
 
         {/* TAB 8: Trade Parties Directory (Giver / Receiver / Another Party) */}
-        <button
-          onClick={() => setActiveSubTab('parties')}
-          className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
-            activeSubTab === 'parties'
-              ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-md shadow-amber-600/30'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-          }`}
-        >
-          <Building2 className="w-4 h-4 text-amber-300" />
-          <span>Trade Parties (Giver / Receiver)</span>
-        </button>
+        {isAllowedTab('parties') && (
+          <button
+            onClick={() => setActiveSubTab('parties')}
+            className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
+              activeSubTab === 'parties'
+                ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-md shadow-amber-600/30'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Building2 className="w-4 h-4 text-amber-300" />
+            <span>Trade Parties (Giver / Receiver)</span>
+          </button>
+        )}
 
         {/* TAB 9: FSSAI Label Studio */}
-        <button
-          onClick={() => setActiveSubTab('fssai_label')}
-          className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
-            activeSubTab === 'fssai_label'
-              ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md shadow-emerald-600/30'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-          }`}
-        >
-          <Utensils className="w-4 h-4 text-emerald-300" />
-          <span>FSSAI Label Studio</span>
-        </button>
+        {isAllowedTab('fssai_label') && (
+          <button
+            onClick={() => setActiveSubTab('fssai_label')}
+            className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
+              activeSubTab === 'fssai_label'
+                ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md shadow-emerald-600/30'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Utensils className="w-4 h-4 text-emerald-300" />
+            <span>FSSAI Label Studio</span>
+          </button>
+        )}
 
-        {/* Financial & Logistics Tabs (Hidden from external CHA) */}
-        {!isCha && (
-          <>
-            <button
-              onClick={() => setActiveSubTab('exim')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
-                activeSubTab === 'exim'
-                  ? 'bg-purple-600 text-white shadow-md shadow-purple-600/20'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <Globe className="w-4 h-4" />
-              <span>Shipments & Logistics</span>
-            </button>
+        {/* TAB 10: Shipments & Logistics */}
+        {isAllowedTab('exim') && (
+          <button
+            onClick={() => setActiveSubTab('exim')}
+            className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
+              activeSubTab === 'exim'
+                ? 'bg-purple-600 text-white shadow-md shadow-purple-600/20'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Globe className="w-4 h-4" />
+            <span>Shipments & Logistics</span>
+          </button>
+        )}
 
-            <button
-              onClick={() => setActiveSubTab('billing')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
-                activeSubTab === 'billing'
-                  ? 'bg-sky-600 text-white shadow-md shadow-sky-600/20'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <FileCheck2 className="w-4 h-4" />
-              <span>Invoices & Billing</span>
-            </button>
+        {/* TAB 11: Invoices & Billing */}
+        {isAllowedTab('billing') && (
+          <button
+            onClick={() => setActiveSubTab('billing')}
+            className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
+              activeSubTab === 'billing'
+                ? 'bg-sky-600 text-white shadow-md shadow-sky-600/20'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <FileCheck2 className="w-4 h-4" />
+            <span>Invoices & Billing</span>
+          </button>
+        )}
 
-            <button
-              onClick={() => setActiveSubTab('barcode')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
-                activeSubTab === 'barcode'
-                  ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <Barcode className="w-4 h-4" />
-              <span>Barcode Labels</span>
-            </button>
+        {/* TAB 12: Barcode Labels */}
+        {isAllowedTab('barcode') && (
+          <button
+            onClick={() => setActiveSubTab('barcode')}
+            className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
+              activeSubTab === 'barcode'
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Barcode className="w-4 h-4" />
+            <span>Barcode Labels</span>
+          </button>
+        )}
 
-            <button
-              onClick={() => setActiveSubTab('eway')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
-                activeSubTab === 'eway'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <Truck className="w-4 h-4" />
-              <span>E-Way Bills</span>
-            </button>
+        {/* TAB 13: E-Way Bills */}
+        {isAllowedTab('eway') && (
+          <button
+            onClick={() => setActiveSubTab('eway')}
+            className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
+              activeSubTab === 'eway'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Truck className="w-4 h-4" />
+            <span>E-Way Bills</span>
+          </button>
+        )}
 
-            <button
-              onClick={() => setActiveSubTab('profit')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
-                activeSubTab === 'profit'
-                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <TrendingUp className="w-4 h-4" />
-              <span>Profit & Margins</span>
-            </button>
+        {/* TAB 14: Profit & Margins */}
+        {isAllowedTab('profit') && (
+          <button
+            onClick={() => setActiveSubTab('profit')}
+            className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
+              activeSubTab === 'profit'
+                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <TrendingUp className="w-4 h-4" />
+            <span>Profit & Margins</span>
+          </button>
+        )}
 
-            <button
-              onClick={() => setActiveSubTab('receivables')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
-                activeSubTab === 'receivables'
-                  ? 'bg-amber-600 text-white shadow-md shadow-amber-600/20'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <Clock className="w-4 h-4" />
-              <span>Receivables & Khata</span>
-            </button>
+        {/* TAB 15: Receivables & Khata */}
+        {isAllowedTab('receivables') && (
+          <button
+            onClick={() => setActiveSubTab('receivables')}
+            className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
+              activeSubTab === 'receivables'
+                ? 'bg-amber-600 text-white shadow-md shadow-amber-600/20'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Clock className="w-4 h-4" />
+            <span>Receivables & Khata</span>
+          </button>
+        )}
 
-            <button
-              onClick={() => setActiveSubTab('gst')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
-                activeSubTab === 'gst'
-                  ? 'bg-teal-600 text-white shadow-md shadow-teal-600/20'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <Receipt className="w-4 h-4" />
-              <span>GST Returns</span>
-            </button>
+        {/* TAB 16: GST Returns */}
+        {isAllowedTab('gst') && (
+          <button
+            onClick={() => setActiveSubTab('gst')}
+            className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
+              activeSubTab === 'gst'
+                ? 'bg-teal-600 text-white shadow-md shadow-teal-600/20'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Receipt className="w-4 h-4" />
+            <span>GST Returns</span>
+          </button>
+        )}
 
-            <button
-              onClick={() => setActiveSubTab('import')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
-                activeSubTab === 'import'
-                  ? 'bg-sky-600 text-white shadow-md shadow-sky-600/20'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <UploadCloud className="w-4 h-4" />
-              <span>Import Data</span>
-            </button>
+        {/* TAB 17: Import Data */}
+        {isAllowedTab('import') && (
+          <button
+            onClick={() => setActiveSubTab('import')}
+            className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
+              activeSubTab === 'import'
+                ? 'bg-sky-600 text-white shadow-md shadow-sky-600/20'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <UploadCloud className="w-4 h-4" />
+            <span>Import Data</span>
+          </button>
+        )}
 
-            <button
-              onClick={() => setActiveSubTab('export')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
-                activeSubTab === 'export'
-                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <Download className="w-4 h-4" />
-              <span>Export Data</span>
-            </button>
-          </>
+        {/* TAB 18: Export Data */}
+        {isAllowedTab('export') && (
+          <button
+            onClick={() => setActiveSubTab('export')}
+            className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
+              activeSubTab === 'export'
+                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Download className="w-4 h-4" />
+            <span>Export Data</span>
+          </button>
         )}
 
         {/* Super Admin Only Tab: User Access & Audit Logs */}
-        {isSuperAdmin && (
+        {isAllowedTab('users_audit') && isSuperAdmin && isAdmin && (
           <button
             onClick={() => setActiveSubTab('users_audit')}
             className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
@@ -522,121 +665,136 @@ export function ImportExportScreen() {
           </button>
         )}
 
-        <button
-          onClick={() => setActiveSubTab('logs')}
-          className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
-            activeSubTab === 'logs'
-              ? 'bg-slate-700 text-white shadow-md'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-          }`}
-        >
-          <FileText className="w-4 h-4" />
-          <span>Activity Logs</span>
-        </button>
+        {/* TAB 19: Activity Logs */}
+        {isAllowedTab('logs') && (
+          <button
+            onClick={() => setActiveSubTab('logs')}
+            className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
+              activeSubTab === 'logs'
+                ? 'bg-slate-700 text-white shadow-md'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            <span>Activity Logs</span>
+          </button>
+        )}
       </div>
 
       {/* 4. Tab Body Content */}
       <div className="transition-all">
         {/* Landed Cost Engine */}
-        {activeSubTab === 'landed_cost' && (
+        {activeSubTab === 'landed_cost' && isAllowedTab('landed_cost') && (
           <LandedCostEnginePanel activePersona={activePersona} />
         )}
 
         {/* Container Milestone Matrix */}
-        {activeSubTab === 'containers' && (
+        {activeSubTab === 'containers' && isAllowedTab('containers') && (
           <ContainerTrackingMatrixPanel />
         )}
 
         {/* Pre-Filing Checklists */}
-        {activeSubTab === 'checklists' && (
+        {activeSubTab === 'checklists' && isAllowedTab('checklists') && (
           <PreFilingChecklistPanel activePersona={activePersona} />
         )}
 
         {/* DMS Documents */}
-        {activeSubTab === 'dms' && (
+        {activeSubTab === 'dms' && isAllowedTab('dms') && (
           <DocumentManagementDmsPanel activePersona={activePersona} />
         )}
 
         {/* User Provisioning & RBAC */}
-        {activeSubTab === 'users_audit' && (
+        {activeSubTab === 'users_audit' && isAllowedTab('users_audit') && isAdmin && isSuperAdmin && (
           <UserProvisioningAuditPanel />
         )}
 
         {/* CHA Customs Portal */}
-        {activeSubTab === 'cha' && (
+        {activeSubTab === 'cha' && isAllowedTab('cha') && (
           <CHACustomsPortalPanel />
         )}
 
         {/* Ports Management */}
-        {activeSubTab === 'ports' && (
+        {activeSubTab === 'ports' && isAllowedTab('ports') && (
           <PortsManagementPanel />
         )}
 
         {/* DGFT & Licenses */}
-        {activeSubTab === 'licenses' && (
+        {activeSubTab === 'licenses' && isAllowedTab('licenses') && (
           <DgftLicensesPanel />
         )}
 
         {/* Trade Parties Directory (Foreign & Indian Givers / Receivers / Another Party) */}
-        {activeSubTab === 'parties' && (
+        {activeSubTab === 'parties' && isAllowedTab('parties') && (
           <EximPartiesPanel />
         )}
 
         {/* FSSAI Label Generator */}
-        {activeSubTab === 'fssai_label' && (
+        {activeSubTab === 'fssai_label' && isAllowedTab('fssai_label') && (
           <FssaiLabelGeneratorPanel />
         )}
 
         {/* Smart Billing */}
-        {activeSubTab === 'billing' && !isCha && (
+        {activeSubTab === 'billing' && isAllowedTab('billing') && (
           <SmartBillingPanel
             onOpenEwayBill={() => setActiveSubTab('eway')}
           />
         )}
 
         {/* Barcode Preview */}
-        {activeSubTab === 'barcode' && !isCha && (
+        {activeSubTab === 'barcode' && isAllowedTab('barcode') && (
           <BarcodePreviewPanel />
         )}
 
         {/* E-Way Bill */}
-        {activeSubTab === 'eway' && !isCha && (
+        {activeSubTab === 'eway' && isAllowedTab('eway') && (
           <EWayBillPanel />
         )}
 
         {/* Profit Analysis */}
-        {activeSubTab === 'profit' && !isCha && (
+        {activeSubTab === 'profit' && isAllowedTab('profit') && (
           <ProfitAnalysisPanel />
         )}
 
         {/* Receivables */}
-        {activeSubTab === 'receivables' && !isCha && (
+        {activeSubTab === 'receivables' && isAllowedTab('receivables') && (
           <ReceivablesPanel />
         )}
 
         {/* GST Summary */}
-        {activeSubTab === 'gst' && !isCha && (
+        {activeSubTab === 'gst' && isAllowedTab('gst') && (
           <GstSummaryPanel />
         )}
 
         {/* Exim Shipments */}
-        {activeSubTab === 'exim' && !isCha && (
+        {activeSubTab === 'exim' && isAllowedTab('exim') && (
           <EximTradePanel />
         )}
 
         {/* Import Data */}
-        {activeSubTab === 'import' && !isCha && (
+        {activeSubTab === 'import' && isAllowedTab('import') && (
           <DataImportPanel onImportSuccess={loadOverview} />
         )}
 
         {/* Export Data */}
-        {activeSubTab === 'export' && !isCha && (
+        {activeSubTab === 'export' && isAllowedTab('export') && (
           <DataExportPanel />
         )}
 
         {/* Job Audit Logs */}
-        {activeSubTab === 'logs' && (
+        {activeSubTab === 'logs' && isAllowedTab('logs') && (
           <JobAuditLogsPanel />
+        )}
+
+        {/* Unauthorized Tab Guard Fallback */}
+        {!isAllowedTab(activeSubTab) && (
+          <div className="bg-rose-950/40 border border-rose-500/30 rounded-3xl p-8 text-center text-rose-300">
+            <ShieldAlert className="w-12 h-12 text-rose-400 mx-auto mb-3" />
+            <h3 className="text-lg font-bold text-white">RBAC Access Restricted</h3>
+            <p className="text-xs text-slate-300 mt-1 max-w-md mx-auto">
+              Your role ({user?.role || 'authorized user'}) is not permitted to view this module.
+              Access to this tier is governed by Enterprise RBAC policies.
+            </p>
+          </div>
         )}
       </div>
     </div>
