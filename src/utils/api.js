@@ -302,6 +302,19 @@ export const api = {
   getEximUsers: () => request('/import-export/users'),
   createEximUser: (data) => request('/import-export/users', { method: 'POST', body: JSON.stringify(data) }),
 
+  // Trade Parties Directory (Foreign & Indian Givers, Receivers & Another Party)
+  getEximParties: (params = {}) => {
+    const q = new URLSearchParams();
+    if (params.category) q.append('category', params.category);
+    if (params.role) q.append('role', params.role);
+    if (params.search) q.append('search', params.search);
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return request(`/import-export/parties${qs}`);
+  },
+  createEximParty: (data) => request('/import-export/parties', { method: 'POST', body: JSON.stringify(data) }),
+  updateEximParty: (id, data) => request(`/import-export/parties/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteEximParty: (id) => request(`/import-export/parties/${id}`, { method: 'DELETE' }),
+
   // Settings & Backups (Tenant Scoped)
   getSettings: () => request('/settings'),
   updateSettings: (data) => request('/settings', { method: 'POST', body: JSON.stringify(data) }),

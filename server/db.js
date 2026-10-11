@@ -922,9 +922,42 @@ function initDatabase() {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
     );
+
+    -- ========================================================
+    -- TRADE PARTIES DIRECTORY (FOREIGN & INDIAN GIVER / RECEIVER / ANOTHER PARTY)
+    -- ========================================================
+    CREATE TABLE IF NOT EXISTS exim_parties (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      party_name TEXT NOT NULL,
+      party_code TEXT,
+      party_category TEXT NOT NULL,          -- 'FOREIGN', 'INDIAN'
+      party_role TEXT NOT NULL,              -- 'GIVER', 'RECEIVER', 'ANOTHER_PARTY', 'BOTH'
+      country TEXT NOT NULL,                 -- 'India', 'Germany', 'United Arab Emirates', 'USA', 'Singapore', etc.
+      tax_id TEXT,                           -- GSTIN (India) / VAT ID / Federal EIN / TRN
+      iec_number TEXT,                       -- IEC (India) or Foreign Business Reg #
+      contact_person TEXT,
+      email TEXT,
+      phone TEXT,
+      address TEXT NOT NULL,
+      city TEXT,
+      state TEXT,
+      postal_code TEXT,
+      port_code TEXT,                        -- e.g. 'INNSA', 'AEJEA', 'DEHAM', 'SGSIN'
+      currency TEXT DEFAULT 'USD',           -- 'USD', 'EUR', 'GBP', 'AED', 'SGD', 'INR'
+      bank_name TEXT,
+      bank_swift_bic TEXT,
+      bank_iban_account TEXT,
+      credit_terms_days INTEGER DEFAULT 30,
+      notes TEXT,
+      status TEXT DEFAULT 'active',          -- 'active', 'inactive'
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    );
   `);
 
   ensureTenantColumns();
+  ensureEximColumns();
   seedSubscriptionPlans();
   seedSubscriptionInvoices();
   seedLabData();
@@ -948,6 +981,51 @@ function ensureTenantColumns() {
     }
   } catch (err) {
     console.error('Migration error in tenants columns:', err);
+  }
+}
+
+function ensureEximColumns() {
+  try {
+    const invCols = db.prepare('PRAGMA table_info(sales_invoices)').all().map(c => c.name);
+    const eximInvFields = [
+      ['another_party_name', 'TEXT'],
+      ['another_party_role', 'TEXT'],
+      ['another_party_country', 'TEXT'],
+      ['another_party_address', 'TEXT'],
+      ['another_party_tax_id', 'TEXT'],
+      ['giver_party_name', 'TEXT'],
+      ['giver_party_country', 'TEXT'],
+      ['giver_party_address', 'TEXT'],
+      ['giver_party_tax_id', 'TEXT'],
+      ['is_export', 'INTEGER DEFAULT 0'],
+      ['lut_number', 'TEXT'],
+      ['port_of_loading', 'TEXT'],
+      ['port_of_discharge', 'TEXT'],
+      ['place_of_supply', 'TEXT']
+    ];
+    eximInvFields.forEach(([col, type]) => {
+      if (!invCols.includes(col)) {
+        db.exec(`ALTER TABLE sales_invoices ADD COLUMN ${col} ${type}`);
+      }
+    });
+
+    const shipCols = db.prepare('PRAGMA table_info(exim_shipments)').all().map(c => c.name);
+    const eximShipFields = [
+      ['giver_party_name', 'TEXT'],
+      ['giver_party_country', 'TEXT'],
+      ['receiver_party_name', 'TEXT'],
+      ['receiver_party_country', 'TEXT'],
+      ['another_party_name', 'TEXT'],
+      ['another_party_role', 'TEXT'],
+      ['another_party_country', 'TEXT']
+    ];
+    eximShipFields.forEach(([col, type]) => {
+      if (!shipCols.includes(col)) {
+        db.exec(`ALTER TABLE exim_shipments ADD COLUMN ${col} ${type}`);
+      }
+    });
+  } catch (err) {
+    console.error('Migration error in exim columns:', err);
   }
 }
 
@@ -2384,6 +2462,73 @@ function seedTenantImportExportData(tenantId) {
         tenantId, 'EXP-26-000001', 'origin_cert', 'Chamber of Commerce Certificate of Origin',
         'COO-IN-2026-88192.pdf', 145, 'Ananya Deshmukh', 'logistics', 'verified', 'FIEO Trade Desk',
         'Non-preferential Certificate of Origin for Dubai Port customs entry.'
+      );
+    }
+
+    // Seed Trade Parties Directory (Foreign & Indian Givers, Receivers & Another Party)
+    const partyCount = db.prepare('SELECT COUNT(*) as count FROM exim_parties WHERE tenant_id = ?').get(tenantId).count;
+    if (partyCount === 0) {
+      const insParty = db.prepare(`
+        INSERT INTO exim_parties (
+          tenant_id, party_name, party_code, party_category, party_role,
+          country, tax_id, iec_number, contact_person, email, phone,
+          address, city, state, postal_code, port_code, currency,
+          bank_name, bank_swift_bic, bank_iban_account, credit_terms_days, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      // 1. Foreign Giver (Overseas Supplier / Consignor / Manufacturer)
+      insParty.run(
+        tenantId, 'Merck KGaA Life Science Division', 'PRT-FOR-GIV-01', 'FOREIGN', 'GIVER',
+        'Germany', 'DE114102981', 'EORI-DE-992100', 'Dr. Klaus Becker', 'export.orders@merckgroup.de', '+49 6151 720',
+        'Frankfurter Strasse 250', 'Darmstadt', 'Hesse', '64293', 'DEHAM', 'EUR',
+        'Deutsche Bank AG Frankfurt', 'DEUTDEDDFXX', 'DE89370400440532013000', 45,
+        'Primary European supplier for active pharmaceutical ingredients & laboratory reagent solutions.'
+      );
+
+      // 2. Foreign Receiver (Overseas Buyer / Consignee / Importer)
+      insParty.run(
+        tenantId, 'Al-Bahar Foodstuff & Grain Trading LLC', 'PRT-FOR-REC-01', 'FOREIGN', 'RECEIVER',
+        'United Arab Emirates', 'TRN-10029814400003', 'DXB-MCH-88210', 'Sheikh Tariq Al-Bahar', 'purchasing@albahargroup.ae', '+971 4 800 9988',
+        'Warehouse 14, Al Quoz Industrial Area 3, Sheikh Zayed Road', 'Dubai', 'Dubai', 'P.O. Box 4892', 'AEJEA', 'AED',
+        'Emirates NBD Bank PJSC', 'EBILAEADXXX', 'AE070260000109283746190', 30,
+        'Major Middle East importer for Indian XXL Aged Basmati Rice, Moringa Powders and Spices.'
+      );
+
+      // 3. Indian Giver (Domestic Manufacturer / Consignor / Shipper)
+      insParty.run(
+        tenantId, 'NexaHarvest Agro Processing Mills Ltd', 'PRT-IND-GIV-01', 'INDIAN', 'GIVER',
+        'India', '06AAACN9102K1Z9', '0508012349', 'Rameshwar Lal Patel', 'factory@nexaharvest.com', '+91 184 220 9981',
+        'G.T. Karnal Road, Agro Food Processing SEZ, Sector 34', 'Karnal', 'Haryana', '132001', 'INNSA', 'INR',
+        'State Bank of India Overseas Branch', 'SBININBB219', '3099201948102', 60,
+        'Domestic agro mill supplier supplying certified organic grains for zero-rated export consignments.'
+      );
+
+      // 4. Indian Receiver (Domestic Consignee / Importer / Customer)
+      insParty.run(
+        tenantId, 'Global MedTech Diagnostics India Pvt Ltd', 'PRT-IND-REC-01', 'INDIAN', 'RECEIVER',
+        'India', '27AABCG8819P1ZU', '0310084421', 'Dr. Meenakshi Sunderam', 'procurement@globalmedtech.in', '+91 22 2849 5500',
+        'Tower B, Mindspace IT & Biotech SEZ, Thane-Belapur Road', 'Navi Mumbai', 'Maharashtra', '400708', 'INNSA', 'INR',
+        'HDFC Bank Corporate Banking Mumbai', 'HDFCINBB001', '50200019284710', 30,
+        'Indian domestic buyer receiving imported diagnostics kits and hospital medical consignments.'
+      );
+
+      // 5. Foreign Another Party (Overseas Notify Party / Transshipment Intermediary)
+      insParty.run(
+        tenantId, 'Pacific Orient Express Logistics Pte Ltd', 'PRT-FOR-NOT-01', 'FOREIGN', 'ANOTHER_PARTY',
+        'Singapore', 'UEN-201829104K', 'SGP-EXIM-5510', 'Chee Wee Tan', 'operations@pacificorient.sg', '+65 6821 4400',
+        '10 Pasir Panjang Road, #08-01 Mapletree Business City', 'Singapore', 'Singapore', '117438', 'SGSIN', 'SGD',
+        'DBS Bank Singapore', 'DBSSSGSGXXX', 'SG04DBS01239840192847', 15,
+        'Third-party freight forwarding and notify agent handling Far East transshipments & high-sea diversions.'
+      );
+
+      // 6. Indian Another Party (Domestic Notify Party / CFS Intermediate Consignee)
+      insParty.run(
+        tenantId, 'Gateway Distriparks Cold Storage & CFS Logistics', 'PRT-IND-NOT-01', 'INDIAN', 'ANOTHER_PARTY',
+        'India', '27AAACG4419E1Z2', '0399104820', 'Captain Sunil Deshmukh', 'cfs.clearance@gatewaydistriparks.com', '+91 22 2724 6600',
+        'Sector 2, Dronagiri Node, JNPT Port Corridor, Uran', 'Navi Mumbai', 'Maharashtra', '400707', 'INNSA', 'INR',
+        'ICICI Bank JNPT Harbour Branch', 'ICICINBB044', '004405001928', 15,
+        'Designated Container Freight Station (CFS) for de-stuffing, customs examination, and reefer ground storage.'
       );
     }
   } catch (err) {

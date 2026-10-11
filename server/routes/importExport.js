@@ -1102,10 +1102,18 @@ router.post('/shipments', (req, res) => {
       invoice_number, invoice_value, currency, exchange_rate,
       port_of_loading, port_of_discharge, carrier_name, bill_of_lading_no,
       container_no, customs_entry_bill_no, customs_duty_amount,
-      hs_tariff_code, status, eta_date, notes
+      hs_tariff_code, status, eta_date, notes,
+      giver_party_name, giver_party_country,
+      receiver_party_name, receiver_party_country,
+      another_party_name, another_party_role, another_party_country
     } = req.body;
 
-    if (!partner_name) return res.status(400).json({ error: 'Partner Name is required' });
+    if (!partner_name && !giver_party_name && !receiver_party_name) {
+      return res.status(400).json({ error: 'Trade partner or Giver/Receiver is required' });
+    }
+    const finalPartnerName = partner_name || (trade_type === 'EXPORT' ? receiver_party_name : giver_party_name);
+    const finalPartnerCountry = partner_country || (trade_type === 'EXPORT' ? receiver_party_country : giver_party_country) || 'International';
+
     const val = Number(invoice_value);
     if (isNaN(val) || val <= 0) return res.status(400).json({ error: 'Valid invoice value is required' });
 
@@ -1120,16 +1128,19 @@ router.post('/shipments', (req, res) => {
         iec_code, incoterm, invoice_number, invoice_value, currency, exchange_rate,
         total_inr_value, port_of_loading, port_of_discharge, carrier_name,
         bill_of_lading_no, container_no, customs_entry_bill_no, customs_duty_amount,
-        hs_tariff_code, status, eta_date, notes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        hs_tariff_code, status, eta_date, notes,
+        giver_party_name, giver_party_country,
+        receiver_party_name, receiver_party_country,
+        another_party_name, another_party_role, another_party_country
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const result = insert.run(
       tenantId,
       shipNum,
       type,
-      partner_name,
-      partner_country || 'International',
+      finalPartnerName,
+      finalPartnerCountry,
       iec_code || '0508012349',
       incoterm || 'CIF',
       invoice_number || null,
@@ -1147,7 +1158,14 @@ router.post('/shipments', (req, res) => {
       hs_tariff_code || null,
       status || 'in_transit',
       eta_date || null,
-      notes || null
+      notes || null,
+      giver_party_name || null,
+      giver_party_country || null,
+      receiver_party_name || null,
+      receiver_party_country || null,
+      another_party_name || null,
+      another_party_role || null,
+      another_party_country || null
     );
 
     res.status(201).json({
@@ -1391,7 +1409,20 @@ router.post('/invoices', (req, res) => {
       upi_paid = 0,
       khata_amount = 0,
       is_export_bill = false,
+      is_export = false,
       lut_number = '',
+      another_party_name = null,
+      another_party_role = null,
+      another_party_country = null,
+      another_party_address = null,
+      another_party_tax_id = null,
+      giver_party_name = null,
+      giver_party_country = null,
+      giver_party_address = null,
+      giver_party_tax_id = null,
+      port_of_loading = null,
+      port_of_discharge = null,
+      place_of_supply = null,
       notes
     } = req.body;
 
@@ -1413,7 +1444,7 @@ router.post('/invoices', (req, res) => {
       const rate = Number(it.rate || it.unit_price) || 0;
       const disc = Number(it.discount) || 0;
       const lineTotal = (qty * rate) - disc;
-      const gstRate = is_export_bill ? 0 : (Number(it.gst_rate) || 0); // Zero-rated under LUT if export
+      const gstRate = (is_export_bill || is_export) ? 0 : (Number(it.gst_rate) || 0); // Zero-rated under LUT if export
       const gstAmt = Number(((lineTotal * gstRate) / 100).toFixed(2));
 
       subtotal += lineTotal;
@@ -1452,8 +1483,11 @@ router.post('/invoices', (req, res) => {
       INSERT INTO sales_invoices (
         tenant_id, invoice_number, customer_id, customer_name, customer_phone,
         total_items, subtotal, tax_amount, discount_amount, round_off,
-        grand_total, payment_mode, cash_paid, upi_paid, khata_amount, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed')
+        grand_total, payment_mode, cash_paid, upi_paid, khata_amount, status,
+        another_party_name, another_party_role, another_party_country, another_party_address, another_party_tax_id,
+        giver_party_name, giver_party_country, giver_party_address, giver_party_tax_id,
+        is_export, lut_number, port_of_loading, port_of_discharge, place_of_supply
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const invResult = insertInv.run(
@@ -1471,7 +1505,21 @@ router.post('/invoices', (req, res) => {
       payment_mode,
       Number(cash_paid) || 0,
       Number(upi_paid) || 0,
-      Number(khata_amount) || 0
+      Number(khata_amount) || 0,
+      another_party_name,
+      another_party_role,
+      another_party_country,
+      another_party_address,
+      another_party_tax_id,
+      giver_party_name,
+      giver_party_country,
+      giver_party_address,
+      giver_party_tax_id,
+      (is_export || is_export_bill) ? 1 : 0,
+      lut_number,
+      port_of_loading,
+      port_of_discharge,
+      place_of_supply
     );
 
     const invoiceId = invResult.lastInsertRowid;
@@ -1489,13 +1537,32 @@ router.post('/invoices', (req, res) => {
       const rate = Number(it.rate || it.unit_price) || 0;
       const disc = Number(it.discount) || 0;
       const lineTotal = (qty * rate) - disc;
-      const gstRate = is_export_bill ? 0 : (Number(it.gst_rate) || 0);
+      const gstRate = (is_export_bill || is_export) ? 0 : (Number(it.gst_rate) || 0);
       const gstAmt = Number(((lineTotal * gstRate) / 100).toFixed(2));
+
+      let prodId = it.product_id;
+      if (!prodId) {
+        const itemTitle = it.product_name || it.name || 'Trade Goods';
+        const existingProd = db.prepare('SELECT id FROM products WHERE tenant_id = ? AND name = ?').get(tenantId, itemTitle);
+        if (existingProd) {
+          prodId = existingProd.id;
+        } else {
+          const newProd = db.prepare(`
+            INSERT INTO products (tenant_id, name, hsn_code, category, gst_rate)
+            VALUES (?, ?, ?, 'Export Trade Goods', ?)
+          `).run(tenantId, itemTitle, it.hsn_code || '8482.10', gstRate);
+          prodId = newProd.lastInsertRowid;
+          db.prepare(`
+            INSERT INTO batches (tenant_id, product_id, batch_number, expiry_date, purchase_rate, mrp, selling_rate, stock_units)
+            VALUES (?, ?, 'EXP-LOT-01', '2028-12-31', ?, ?, ?, 1000)
+          `).run(tenantId, prodId, rate * 0.7, Number(it.mrp) || rate, rate);
+        }
+      }
 
       insertItem.run(
         tenantId,
         invoiceId,
-        it.product_id || null,
+        prodId,
         it.product_name || it.name,
         it.batch_id || null,
         it.batch_number || 'LOT-DEFAULT',
@@ -1543,7 +1610,31 @@ router.post('/invoices', (req, res) => {
       amount_in_words: numberToWords(grandTotal),
       upi_payload: upiPayload,
       net_profit: netProfit,
-      profit_margin_percent: profitMargin
+      profit_margin_percent: profitMargin,
+      invoice: {
+        id: invoiceId,
+        invoice_number: invNo,
+        customer_name: cName,
+        customer_phone: cPhone,
+        customer_address,
+        grand_total: grandTotal,
+        subtotal,
+        tax_amount: totalTax,
+        amount_in_words: numberToWords(grandTotal),
+        payment_mode,
+        is_export: (is_export || is_export_bill) ? 1 : 0,
+        lut_number,
+        another_party_name,
+        another_party_role,
+        another_party_country,
+        another_party_address,
+        another_party_tax_id,
+        giver_party_name,
+        giver_party_country,
+        giver_party_address,
+        giver_party_tax_id,
+        items
+      }
     });
   } catch (err) {
     console.error('Error creating trade invoice:', err);
@@ -3247,6 +3338,261 @@ router.post('/users', (req, res) => {
     if (err.message && err.message.includes('UNIQUE')) {
       return res.status(400).json({ error: 'Email is already registered' });
     }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ========================================================
+// 17. TRADE PARTIES DIRECTORY (FOREIGN & INDIAN GIVERS, RECEIVERS & ANOTHER PARTY)
+// ========================================================
+
+router.get('/parties', (req, res) => {
+  try {
+    const tenantId = req.tenantId;
+    if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
+
+    const { category, role, search } = req.query;
+
+    let query = 'SELECT * FROM exim_parties WHERE tenant_id = ?';
+    const params = [tenantId];
+
+    if (category && category !== 'ALL') {
+      query += ' AND party_category = ?';
+      params.push(category.toUpperCase());
+    }
+
+    if (role && role !== 'ALL') {
+      query += ' AND (party_role = ? OR party_role = "BOTH")';
+      params.push(role.toUpperCase());
+    }
+
+    if (search) {
+      query += ' AND (party_name LIKE ? OR party_code LIKE ? OR tax_id LIKE ? OR country LIKE ? OR contact_person LIKE ?)';
+      const term = `%${search}%`;
+      params.push(term, term, term, term, term);
+    }
+
+    query += ' ORDER BY id DESC';
+
+    const parties = db.prepare(query).all(...params);
+
+    // Compute stats across all tenant parties
+    const allParties = db.prepare('SELECT party_category, party_role FROM exim_parties WHERE tenant_id = ?').all(tenantId);
+    let foreignGivers = 0;
+    let foreignReceivers = 0;
+    let indianGivers = 0;
+    let indianReceivers = 0;
+    let anotherParties = 0;
+
+    allParties.forEach(p => {
+      if (p.party_role === 'ANOTHER_PARTY') anotherParties++;
+      else if (p.party_category === 'FOREIGN' && (p.party_role === 'GIVER' || p.party_role === 'BOTH')) foreignGivers++;
+      else if (p.party_category === 'FOREIGN' && p.party_role === 'RECEIVER') foreignReceivers++;
+      else if (p.party_category === 'INDIAN' && (p.party_role === 'GIVER' || p.party_role === 'BOTH')) indianGivers++;
+      else if (p.party_category === 'INDIAN' && p.party_role === 'RECEIVER') indianReceivers++;
+    });
+
+    res.json({
+      parties,
+      stats: {
+        total: allParties.length,
+        foreign_givers: foreignGivers,
+        foreign_receivers: foreignReceivers,
+        indian_givers: indianGivers,
+        indian_receivers: indianReceivers,
+        another_parties: anotherParties
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching trade parties:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/parties', (req, res) => {
+  try {
+    const tenantId = req.tenantId;
+    if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
+
+    const {
+      party_name,
+      party_code,
+      party_category = 'FOREIGN',
+      party_role = 'GIVER',
+      country = 'India',
+      tax_id,
+      iec_number,
+      contact_person,
+      email,
+      phone,
+      address,
+      city,
+      state,
+      postal_code,
+      port_code,
+      currency = 'USD',
+      bank_name,
+      bank_swift_bic,
+      bank_iban_account,
+      credit_terms_days = 30,
+      notes
+    } = req.body;
+
+    if (!party_name || !address) {
+      return res.status(400).json({ error: 'Party Name and Corporate Address are required' });
+    }
+
+    const genCode = party_code ? party_code.trim().toUpperCase() : `PRT-${party_category.slice(0,3)}-${Date.now().toString().slice(-4)}`;
+
+    const insert = db.prepare(`
+      INSERT INTO exim_parties (
+        tenant_id, party_name, party_code, party_category, party_role,
+        country, tax_id, iec_number, contact_person, email, phone,
+        address, city, state, postal_code, port_code, currency,
+        bank_name, bank_swift_bic, bank_iban_account, credit_terms_days, notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const result = insert.run(
+      tenantId,
+      party_name.trim(),
+      genCode,
+      party_category.toUpperCase(),
+      party_role.toUpperCase(),
+      country.trim(),
+      tax_id ? tax_id.trim() : null,
+      iec_number ? iec_number.trim() : null,
+      contact_person ? contact_person.trim() : null,
+      email ? email.trim() : null,
+      phone ? phone.trim() : null,
+      address.trim(),
+      city ? city.trim() : null,
+      state ? state.trim() : null,
+      postal_code ? postal_code.trim() : null,
+      port_code ? port_code.trim() : null,
+      currency.toUpperCase(),
+      bank_name ? bank_name.trim() : null,
+      bank_swift_bic ? bank_swift_bic.trim() : null,
+      bank_iban_account ? bank_iban_account.trim() : null,
+      Number(credit_terms_days) || 30,
+      notes ? notes.trim() : null
+    );
+
+    res.status(201).json({
+      success: true,
+      id: result.lastInsertRowid,
+      message: `Party ${party_name} registered successfully`
+    });
+  } catch (err) {
+    console.error('Error creating trade party:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/parties/:id', (req, res) => {
+  try {
+    const tenantId = req.tenantId;
+    if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
+
+    const partyId = req.params.id;
+    const existing = db.prepare('SELECT id FROM exim_parties WHERE id = ? AND tenant_id = ?').get(partyId, tenantId);
+    if (!existing) return res.status(404).json({ error: 'Party not found' });
+
+    const {
+      party_name,
+      party_code,
+      party_category,
+      party_role,
+      country,
+      tax_id,
+      iec_number,
+      contact_person,
+      email,
+      phone,
+      address,
+      city,
+      state,
+      postal_code,
+      port_code,
+      currency,
+      bank_name,
+      bank_swift_bic,
+      bank_iban_account,
+      credit_terms_days,
+      notes,
+      status
+    } = req.body;
+
+    db.prepare(`
+      UPDATE exim_parties SET
+        party_name = COALESCE(?, party_name),
+        party_code = COALESCE(?, party_code),
+        party_category = COALESCE(?, party_category),
+        party_role = COALESCE(?, party_role),
+        country = COALESCE(?, country),
+        tax_id = COALESCE(?, tax_id),
+        iec_number = COALESCE(?, iec_number),
+        contact_person = COALESCE(?, contact_person),
+        email = COALESCE(?, email),
+        phone = COALESCE(?, phone),
+        address = COALESCE(?, address),
+        city = COALESCE(?, city),
+        state = COALESCE(?, state),
+        postal_code = COALESCE(?, postal_code),
+        port_code = COALESCE(?, port_code),
+        currency = COALESCE(?, currency),
+        bank_name = COALESCE(?, bank_name),
+        bank_swift_bic = COALESCE(?, bank_swift_bic),
+        bank_iban_account = COALESCE(?, bank_iban_account),
+        credit_terms_days = COALESCE(?, credit_terms_days),
+        notes = COALESCE(?, notes),
+        status = COALESCE(?, status)
+      WHERE id = ? AND tenant_id = ?
+    `).run(
+      party_name || null,
+      party_code || null,
+      party_category || null,
+      party_role || null,
+      country || null,
+      tax_id || null,
+      iec_number || null,
+      contact_person || null,
+      email || null,
+      phone || null,
+      address || null,
+      city || null,
+      state || null,
+      postal_code || null,
+      port_code || null,
+      currency || null,
+      bank_name || null,
+      bank_swift_bic || null,
+      bank_iban_account || null,
+      credit_terms_days !== undefined ? Number(credit_terms_days) : null,
+      notes || null,
+      status || null,
+      partyId,
+      tenantId
+    );
+
+    res.json({ success: true, message: 'Party updated successfully' });
+  } catch (err) {
+    console.error('Error updating trade party:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/parties/:id', (req, res) => {
+  try {
+    const tenantId = req.tenantId;
+    if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
+
+    const result = db.prepare('DELETE FROM exim_parties WHERE id = ? AND tenant_id = ?').run(req.params.id, tenantId);
+    if (result.changes === 0) return res.status(404).json({ error: 'Party not found' });
+
+    res.json({ success: true, message: 'Party deleted successfully' });
+  } catch (err) {
+    console.error('Error deleting trade party:', err);
     res.status(500).json({ error: err.message });
   }
 });

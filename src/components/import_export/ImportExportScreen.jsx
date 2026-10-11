@@ -15,6 +15,7 @@ import { DgftLicensesPanel } from './DgftLicensesPanel';
 import { PortsManagementPanel } from './PortsManagementPanel';
 import { FssaiLabelGeneratorPanel } from './FssaiLabelGeneratorPanel';
 import { JobAuditLogsPanel } from './JobAuditLogsPanel';
+import { EximPartiesPanel } from './EximPartiesPanel';
 
 // Enterprise Tier & RBAC Panels
 import { LandedCostEnginePanel } from './LandedCostEnginePanel';
@@ -26,6 +27,7 @@ import { UserProvisioningAuditPanel } from './UserProvisioningAuditPanel';
 import {
   Anchor,
   Award,
+  Building2,
   ArrowLeftRight,
   UploadCloud,
   Download,
@@ -131,19 +133,19 @@ export function ImportExportScreen() {
   const handlePersonaChange = (newPersona) => {
     setActivePersona(newPersona);
     if (newPersona === 'cha_agent') {
-      const allowedChaTabs = ['checklists', 'cha', 'dms', 'ports', 'licenses', 'fssai_label'];
+      const allowedChaTabs = ['checklists', 'cha', 'dms', 'ports', 'licenses', 'parties', 'fssai_label'];
       if (!allowedChaTabs.includes(activeSubTab)) {
         setActiveSubTab('checklists');
       }
       showToast('Switched to Customs House Agent (CHA Partner) — Financial Ledgers Stripped', 'info');
     } else if (newPersona === 'accountant') {
-      const allowedAccountsTabs = ['landed_cost', 'billing', 'profit', 'receivables', 'gst', 'dms', 'checklists', 'ports'];
+      const allowedAccountsTabs = ['landed_cost', 'billing', 'parties', 'profit', 'receivables', 'gst', 'dms', 'checklists', 'ports'];
       if (!allowedAccountsTabs.includes(activeSubTab)) {
         setActiveSubTab('landed_cost');
       }
       showToast('Switched to Accounts Dept — True Landed Cost & FX Ledger Active', 'info');
     } else if (newPersona === 'logistics') {
-      const allowedLogisticsTabs = ['containers', 'exim', 'eway', 'fssai_label', 'barcode', 'dms', 'ports', 'import', 'export'];
+      const allowedLogisticsTabs = ['containers', 'exim', 'parties', 'eway', 'fssai_label', 'barcode', 'dms', 'ports', 'import', 'export'];
       if (!allowedLogisticsTabs.includes(activeSubTab)) {
         setActiveSubTab('containers');
       }
@@ -366,7 +368,20 @@ export function ImportExportScreen() {
           <span>DGFT, RCMC & FSSAI</span>
         </button>
 
-        {/* TAB 8: FSSAI Label Studio */}
+        {/* TAB 8: Trade Parties Directory (Giver / Receiver / Another Party) */}
+        <button
+          onClick={() => setActiveSubTab('parties')}
+          className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
+            activeSubTab === 'parties'
+              ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-md shadow-amber-600/30'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+          }`}
+        >
+          <Building2 className="w-4 h-4 text-amber-300" />
+          <span>Trade Parties (Giver / Receiver)</span>
+        </button>
+
+        {/* TAB 9: FSSAI Label Studio */}
         <button
           onClick={() => setActiveSubTab('fssai_label')}
           className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
@@ -560,6 +575,11 @@ export function ImportExportScreen() {
         {/* DGFT & Licenses */}
         {activeSubTab === 'licenses' && (
           <DgftLicensesPanel />
+        )}
+
+        {/* Trade Parties Directory (Foreign & Indian Givers / Receivers / Another Party) */}
+        {activeSubTab === 'parties' && (
+          <EximPartiesPanel />
         )}
 
         {/* FSSAI Label Generator */}

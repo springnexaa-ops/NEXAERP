@@ -222,16 +222,38 @@ export function BillPreviewModal({ isOpen, onClose, invoice, businessInfo, onOpe
             </div>
 
             {/* 2. Bill To & Shipping / Customs Information */}
-            <div className="grid grid-cols-2 gap-4 py-3 border-b border-slate-300">
+            <div className={`grid ${inv.another_party_name ? 'grid-cols-1 md:grid-cols-3' : 'grid-cols-1 md:grid-cols-2'} gap-4 py-3 border-b border-slate-300`}>
               <div className="space-y-0.5">
-                <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">Bill To (Consignee)</span>
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">Bill To (Consignee / Receiver)</span>
                 <p className="font-bold text-slate-900 text-xs">{inv.customer_name || 'Global Dynamics International Corp'}</p>
                 <p className="text-slate-600 text-[11px]">{inv.customer_address || 'Terminal 3, Free Trade Logistics Zone, Dubai, UAE'}</p>
                 <p className="text-slate-600 text-[11px]">Phone: {inv.customer_phone || '+971 4 800 9988'}</p>
                 <p className="text-[11px] font-mono font-semibold text-slate-800">
-                  GSTIN / VAT ID: {inv.customer_gstin || 'ARE1092881920'}
+                  GSTIN / VAT ID: {inv.customer_gstin || inv.tax_id || 'ARE1092881920'}
                 </p>
               </div>
+
+              {inv.another_party_name && (
+                <div className="space-y-0.5 pl-3 border-l border-slate-200 bg-amber-50/60 p-2.5 rounded-lg border border-amber-200">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-amber-900">
+                      Another Party ({inv.another_party_role || 'Notify Party'})
+                    </span>
+                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-200 text-amber-900 font-mono">
+                      {inv.another_party_country || 'International'}
+                    </span>
+                  </div>
+                  <p className="font-bold text-slate-900 text-xs">{inv.another_party_name}</p>
+                  {inv.another_party_address && (
+                    <p className="text-slate-600 text-[10px] leading-tight">{inv.another_party_address}</p>
+                  )}
+                  {inv.another_party_tax_id && (
+                    <p className="text-[10px] font-mono text-slate-700 mt-1">
+                      Tax/VAT ID: <strong className="text-slate-900">{inv.another_party_tax_id}</strong>
+                    </p>
+                  )}
+                </div>
+              )}
 
               <div className="space-y-0.5 pl-4 border-l border-slate-200">
                 <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">Logistics & Compliance</span>

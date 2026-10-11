@@ -35,12 +35,22 @@ export function SmartBillingPanel({ onOpenEwayBill }) {
   const [isNewInvoiceOpen, setIsNewInvoiceOpen] = useState(false);
 
   // New Invoice Form state
+  const [parties, setParties] = useState([]);
   const [customerName, setCustomerName] = useState('Global Dynamics International Corp');
   const [customerPhone, setCustomerPhone] = useState('+971 4 800 9988');
   const [customerAddress, setCustomerAddress] = useState('Terminal 3, Free Trade Logistics Zone, Dubai, UAE');
   const [isExport, setIsExport] = useState(true);
   const [lutNumber, setLutNumber] = useState('LUT-2026-9811');
   const [paymentMode, setPaymentMode] = useState('upi');
+
+  // Another Party State
+  const [hasAnotherParty, setHasAnotherParty] = useState(false);
+  const [anotherPartyName, setAnotherPartyName] = useState('Pacific Orient Express Logistics Pte Ltd');
+  const [anotherPartyRole, setAnotherPartyRole] = useState('Notify Party');
+  const [anotherPartyCountry, setAnotherPartyCountry] = useState('Singapore');
+  const [anotherPartyAddress, setAnotherPartyAddress] = useState('10 Pasir Panjang Road, Mapletree Business City, Singapore');
+  const [anotherPartyTaxId, setAnotherPartyTaxId] = useState('UEN-201829104K');
+
   const [items, setItems] = useState([
     {
       product_id: 1,
@@ -56,7 +66,17 @@ export function SmartBillingPanel({ onOpenEwayBill }) {
   useEffect(() => {
     loadInvoices();
     loadProducts();
+    loadParties();
   }, []);
+
+  const loadParties = async () => {
+    try {
+      const data = await api.getEximParties();
+      setParties(data.parties || []);
+    } catch (err) {
+      console.error('Failed to load trade parties:', err);
+    }
+  };
 
   const loadInvoices = async () => {
     try {
@@ -132,6 +152,11 @@ export function SmartBillingPanel({ onOpenEwayBill }) {
         export_type: isExport ? 'LUT' : 'TAX',
         lut_number: isExport ? lutNumber : null,
         payment_mode: paymentMode,
+        another_party_name: hasAnotherParty ? anotherPartyName : null,
+        another_party_role: hasAnotherParty ? anotherPartyRole : null,
+        another_party_country: hasAnotherParty ? anotherPartyCountry : null,
+        another_party_address: hasAnotherParty ? anotherPartyAddress : null,
+        another_party_tax_id: hasAnotherParty ? anotherPartyTaxId : null,
         items
       };
 
@@ -140,7 +165,15 @@ export function SmartBillingPanel({ onOpenEwayBill }) {
       await loadInvoices();
 
       // Open the bill preview immediately for the created invoice!
-      setSelectedInvoice(res.invoice);
+      const invoiceToPreview = {
+        ...(res.invoice || payload),
+        another_party_name: hasAnotherParty ? anotherPartyName : null,
+        another_party_role: hasAnotherParty ? anotherPartyRole : null,
+        another_party_country: hasAnotherParty ? anotherPartyCountry : null,
+        another_party_address: hasAnotherParty ? anotherPartyAddress : null,
+        another_party_tax_id: hasAnotherParty ? anotherPartyTaxId : null
+      };
+      setSelectedInvoice(invoiceToPreview);
       setIsBillPreviewOpen(true);
     } catch (err) {
       alert(err.message || 'Failed to create invoice');
@@ -339,7 +372,7 @@ export function SmartBillingPanel({ onOpenEwayBill }) {
               {/* Party Information */}
               <div className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-slate-300">Customer & Consignee Details</span>
+                  <span className="font-bold text-slate-300">Customer & Consignee Details (Receiver)</span>
                   <label className="flex items-center space-x-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -351,6 +384,31 @@ export function SmartBillingPanel({ onOpenEwayBill }) {
                   </label>
                 </div>
 
+                {parties.length > 0 && (
+                  <div>
+                    <label className="block text-slate-400 mb-1">Quick Select from Registered Trade Parties</label>
+                    <select
+                      onChange={(e) => {
+                        const p = parties.find(x => String(x.id) === e.target.value);
+                        if (p) {
+                          setCustomerName(p.party_name);
+                          setCustomerPhone(p.phone || customerPhone);
+                          setCustomerAddress(`${p.address}, ${p.city || ''} ${p.country}`);
+                          setIsExport(p.party_category === 'FOREIGN' || p.country !== 'India');
+                        }
+                      }}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-white font-bold"
+                    >
+                      <option value="">-- Select Registered Party (Receiver / Consignee) --</option>
+                      {parties.map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.party_name} ({p.party_role} - {p.party_category} - {p.country})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-slate-400 mb-1">Customer / Buyer Name</label>
@@ -359,7 +417,7 @@ export function SmartBillingPanel({ onOpenEwayBill }) {
                       required
                       value={customerName}
                       onChange={(e) => setCustomerName(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-sky-500"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-sky-500 font-bold"
                     />
                   </div>
                   <div>
@@ -393,6 +451,111 @@ export function SmartBillingPanel({ onOpenEwayBill }) {
                       onChange={(e) => setLutNumber(e.target.value)}
                       className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono text-emerald-400 focus:outline-none focus:border-emerald-500"
                     />
+                  </div>
+                )}
+              </div>
+
+              {/* Another Party / Notify Party (Optional) */}
+              <div className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-bold text-slate-300 block">Another Party</span>
+                    <span className="text-[10px] text-slate-500">Foreign or Indian Notify Party / Secondary Consignee / Agent</span>
+                  </div>
+                  <label className="flex items-center space-x-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={hasAnotherParty}
+                      onChange={(e) => setHasAnotherParty(e.target.checked)}
+                      className="rounded bg-slate-900 border-slate-700 text-purple-600 focus:ring-0"
+                    />
+                    <span className="text-purple-400 font-semibold">Add Another Party</span>
+                  </label>
+                </div>
+
+                {hasAnotherParty && (
+                  <div className="space-y-3 pt-2 border-t border-slate-900 animate-in fade-in">
+                    {parties.length > 0 && (
+                      <div>
+                        <label className="block text-slate-400 mb-1">Quick Populate from Another Parties Directory</label>
+                        <select
+                          onChange={(e) => {
+                            const p = parties.find(x => String(x.id) === e.target.value);
+                            if (p) {
+                              setAnotherPartyName(p.party_name);
+                              setAnotherPartyRole(p.party_role === 'ANOTHER_PARTY' ? 'Notify Party' : 'Intermediate Consignee');
+                              setAnotherPartyCountry(p.country);
+                              setAnotherPartyAddress(`${p.address}, ${p.city || ''} ${p.country}`);
+                              setAnotherPartyTaxId(p.tax_id || '');
+                            }
+                          }}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-white"
+                        >
+                          <option value="">-- Select Registered Another Party --</option>
+                          {parties.map(p => (
+                            <option key={p.id} value={p.id}>
+                              {p.party_name} ({p.party_role} - {p.party_category} - {p.country})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-400 mb-1">Another Party Legal Name</label>
+                        <input
+                          type="text"
+                          value={anotherPartyName}
+                          onChange={(e) => setAnotherPartyName(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-purple-500 font-bold"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1">Party Function / Role</label>
+                        <select
+                          value={anotherPartyRole}
+                          onChange={(e) => setAnotherPartyRole(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white"
+                        >
+                          <option value="Notify Party">Notify Party (Destination Notice)</option>
+                          <option value="Secondary Consignee">Secondary Consignee / Bill To</option>
+                          <option value="Intermediate Agent">Intermediate Clearing Agent / Broker</option>
+                          <option value="Delivering Warehouse">Delivering Terminal / CFS Warehouse</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-400 mb-1">Country</label>
+                        <input
+                          type="text"
+                          value={anotherPartyCountry}
+                          onChange={(e) => setAnotherPartyCountry(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-purple-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1">Tax ID / VAT / UEN</label>
+                        <input
+                          type="text"
+                          value={anotherPartyTaxId}
+                          onChange={(e) => setAnotherPartyTaxId(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-purple-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-400 mb-1">Address / Port Location</label>
+                      <input
+                        type="text"
+                        value={anotherPartyAddress}
+                        onChange={(e) => setAnotherPartyAddress(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-purple-500"
+                      />
+                    </div>
                   </div>
                 )}
               </div>

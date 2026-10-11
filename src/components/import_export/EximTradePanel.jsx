@@ -28,12 +28,14 @@ export function EximTradePanel() {
   const [shipments, setShipments] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [parties, setParties] = useState([]);
 
   const [tradeFilter, setTradeFilter] = useState('ALL'); // 'ALL', 'IMPORT', 'EXPORT'
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [searchTerm, setSearchTerm] = useState('');
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [hasAnotherParty, setHasAnotherParty] = useState(false);
   const [formData, setFormData] = useState({
     trade_type: 'IMPORT',
     partner_name: '',
@@ -54,12 +56,29 @@ export function EximTradePanel() {
     hs_tariff_code: '3004.90.99',
     status: 'in_transit',
     eta_date: '',
-    notes: ''
+    notes: '',
+    giver_party_name: '',
+    giver_party_country: '',
+    receiver_party_name: '',
+    receiver_party_country: '',
+    another_party_name: '',
+    another_party_role: 'Notify Party',
+    another_party_country: ''
   });
 
   useEffect(() => {
     loadShipments();
+    loadParties();
   }, [tradeFilter, statusFilter, searchTerm]);
+
+  const loadParties = async () => {
+    try {
+      const data = await api.getEximParties();
+      setParties(data.parties || []);
+    } catch (err) {
+      console.error('Error loading trade parties:', err);
+    }
+  };
 
   const loadShipments = async () => {
     try {
@@ -95,6 +114,48 @@ export function EximTradePanel() {
     }));
   };
 
+  const handleSelectParty = (partyId) => {
+    if (!partyId) return;
+    const p = parties.find(x => String(x.id) === String(partyId));
+    if (!p) return;
+
+    const isImp = formData.trade_type === 'IMPORT';
+    let fxRate = formData.exchange_rate;
+    if (p.currency === 'EUR') fxRate = 92.40;
+    else if (p.currency === 'AED') fxRate = 23.05;
+    else if (p.currency === 'GBP') fxRate = 110.20;
+    else if (p.currency === 'SGD') fxRate = 64.80;
+    else if (p.currency === 'INR') fxRate = 1.00;
+    else if (p.currency === 'USD') fxRate = 84.50;
+
+    setFormData(prev => ({
+      ...prev,
+      partner_name: p.party_name,
+      partner_country: p.country,
+      iec_code: p.iec_number || (p.country === 'India' ? '0508012349' : prev.iec_code),
+      currency: p.currency || prev.currency,
+      exchange_rate: fxRate,
+      port_of_loading: isImp ? (p.port_code || prev.port_of_loading) : prev.port_of_loading,
+      port_of_discharge: !isImp ? (p.port_code || prev.port_of_discharge) : prev.port_of_discharge,
+      giver_party_name: isImp ? p.party_name : prev.giver_party_name,
+      giver_party_country: isImp ? p.country : prev.giver_party_country,
+      receiver_party_name: !isImp ? p.party_name : prev.receiver_party_name,
+      receiver_party_country: !isImp ? p.country : prev.receiver_party_country
+    }));
+  };
+
+  const handleSelectAnotherParty = (partyId) => {
+    if (!partyId) return;
+    const p = parties.find(x => String(x.id) === String(partyId));
+    if (!p) return;
+    setFormData(prev => ({
+      ...prev,
+      another_party_name: p.party_name,
+      another_party_country: p.country,
+      another_party_role: p.party_role === 'ANOTHER_PARTY' ? 'Notify Party / Agent' : p.party_role
+    }));
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
@@ -103,7 +164,14 @@ export function EximTradePanel() {
         return;
       }
 
-      await api.createEximShipment(formData);
+      const payload = {
+        ...formData,
+        another_party_name: hasAnotherParty ? formData.another_party_name : null,
+        another_party_role: hasAnotherParty ? formData.another_party_role : null,
+        another_party_country: hasAnotherParty ? formData.another_party_country : null
+      };
+
+      await api.createEximShipment(payload);
       showToast('International trade shipment created successfully', 'success');
       setIsModalOpen(false);
       loadShipments();
@@ -391,6 +459,23 @@ export function EximTradePanel() {
                   </div>
                 </div>
 
+                {/* Another Party Badge (if present) */}
+                {s.another_party_name && (
+                  <div className="mt-2.5 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/20 flex flex-wrap items-center justify-between text-[11px]">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-amber-400 font-bold uppercase text-[10px]">
+                        {s.another_party_role || 'Notify Party'} (Another Party):
+                      </span>
+                      <span className="text-amber-200 font-semibold">{s.another_party_name}</span>
+                    </div>
+                    {s.another_party_country && (
+                      <span className="text-slate-400 font-mono text-[10px]">
+                        Country: {s.another_party_country}
+                      </span>
+                    )}
+                  </div>
+                )}
+
                 {/* Bottom Actions */}
                 <div className="mt-3 pt-2.5 border-t border-slate-800/60 flex items-center justify-between">
                   <div className="text-[10px] text-slate-400">
@@ -447,6 +532,42 @@ export function EximTradePanel() {
             </div>
 
             <form onSubmit={handleSubmit} className="mt-4 space-y-4 text-xs">
+              {/* Registered Trade Party Quick Selection */}
+              {parties.length > 0 && (
+                <div className="p-3 bg-indigo-950/40 border border-indigo-800/40 rounded-2xl">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-indigo-300 text-[11px] font-bold uppercase flex items-center space-x-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>Auto-Fill from Registered Trade Parties</span>
+                    </label>
+                    <span className="text-[10px] text-slate-400">
+                      {parties.length} parties registered
+                    </span>
+                  </div>
+                  <select
+                    onChange={(e) => handleSelectParty(e.target.value)}
+                    className="w-full bg-slate-900 border border-indigo-700/50 rounded-xl px-3 py-2 text-white text-xs font-semibold"
+                    defaultValue=""
+                  >
+                    <option value="">-- Choose Party to Auto-Populate Details --</option>
+                    <optgroup label="Foreign Trade Parties (Giver / Receiver)">
+                      {parties.filter(p => p.party_category === 'FOREIGN').map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.party_name} ({p.country} • {p.party_role})
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Indian Trade Parties (Giver / Receiver)">
+                      {parties.filter(p => p.party_category === 'INDIAN').map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.party_name} ({p.city || 'India'} • {p.party_role})
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+                </div>
+              )}
+
               {/* Row 1: Trade Type & Partner */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
@@ -521,6 +642,93 @@ export function EximTradePanel() {
                     <option value="DDP">DDP (Delivered Duty Paid)</option>
                   </select>
                 </div>
+              </div>
+
+              {/* Multi-Party Section: Another Party (Notify Party / Secondary Consignee / CFS Agent) */}
+              <div className="p-3 bg-slate-900/40 border border-slate-800 rounded-2xl space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="has_another_party_shipment"
+                      checked={hasAnotherParty}
+                      onChange={(e) => setHasAnotherParty(e.target.checked)}
+                      className="w-4 h-4 rounded text-amber-500 bg-slate-800 border-slate-700 focus:ring-amber-500 cursor-pointer"
+                    />
+                    <label htmlFor="has_another_party_shipment" className="text-slate-300 font-bold text-xs cursor-pointer select-none">
+                      Add Another Party (Notify Party / Secondary Consignee / Clearing Agent)
+                    </label>
+                  </div>
+                  <span className="text-[10px] text-amber-400 font-mono">B/L Multi-Party Flow</span>
+                </div>
+
+                {hasAnotherParty && (
+                  <div className="space-y-2.5 pt-2 border-t border-slate-800 animate-in fade-in duration-150">
+                    {parties.length > 0 && (
+                      <div>
+                        <label className="block text-slate-400 text-[10px] font-bold uppercase mb-1">
+                          Select from Registered Parties
+                        </label>
+                        <select
+                          onChange={(e) => handleSelectAnotherParty(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-white text-xs font-semibold"
+                          defaultValue=""
+                        >
+                          <option value="">-- Choose Registered Party --</option>
+                          {parties.map(p => (
+                            <option key={p.id} value={p.id}>
+                              {p.party_name} ({p.country} • {p.party_role})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                      <div className="md:col-span-2">
+                        <label className="block text-slate-400 text-[10px] font-bold uppercase mb-1">
+                          Another Party Enterprise Name *
+                        </label>
+                        <input
+                          type="text"
+                          required={hasAnotherParty}
+                          placeholder="e.g. Pacific Orient Express Logistics / Gateway CFS"
+                          value={formData.another_party_name}
+                          onChange={(e) => setFormData({ ...formData, another_party_name: e.target.value })}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 text-[10px] font-bold uppercase mb-1">
+                          Party Role
+                        </label>
+                        <select
+                          value={formData.another_party_role}
+                          onChange={(e) => setFormData({ ...formData, another_party_role: e.target.value })}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-white font-bold"
+                        >
+                          <option value="Notify Party">Notify Party</option>
+                          <option value="Secondary Consignee">Secondary Consignee</option>
+                          <option value="Clearing CHA Partner">Clearing CHA Partner</option>
+                          <option value="Intermediate Transshipper">Intermediate Transshipper</option>
+                          <option value="CFS Warehouse">CFS Warehouse</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 text-[10px] font-bold uppercase mb-1">
+                          Party Country
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Singapore, UAE, India"
+                          value={formData.another_party_country}
+                          onChange={(e) => setFormData({ ...formData, another_party_country: e.target.value })}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Row 3: Commercial Invoice, Currency & FX Rate */}
