@@ -46,7 +46,7 @@ router.post('/', (req, res) => {
         updates.store_address ?? null,
         updates.phone ?? null,
         updates.gstin ?? null,
-        updates.dl_number || updates.dl_20b ?? null,
+        (updates.dl_number || updates.dl_20b) ?? null,
         updates.fssai_number ?? null,
         tenantId
       );
