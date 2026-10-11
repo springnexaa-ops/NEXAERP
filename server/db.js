@@ -973,7 +973,7 @@ function seedSubscriptionInvoices() {
 
 function seedLabData() {
   try {
-    const existingTenants = db.prepare('SELECT id, name FROM tenants').all();
+    const existingTenants = db.prepare("SELECT id, name FROM tenants WHERE business_type IN ('lmis', 'lab')").all();
     if (!existingTenants.length) return;
 
     for (const tenant of existingTenants) {

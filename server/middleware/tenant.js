@@ -122,6 +122,31 @@ function tenantMiddleware(req, res, next) {
         accessControl: 'ENFORCED'
       };
 
+      // Vertical ERP Module Route Guarding:
+      // Guarantees that tenants of one ERP vertical cannot access or manipulate modules of another ERP vertical
+      const fullUrl = req.originalUrl || req.url || '';
+      const tenantVertical = (tenant.business_type || 'general').toLowerCase();
+
+      // 1. LMIS Pathology Clinical Module Guard
+      if (fullUrl.startsWith('/api/lab') && tenantVertical !== 'lmis' && tenantVertical !== 'lab') {
+        return res.status(403).json({
+          error: `Vertical ERP Isolation Enforced: Your organization edition (${tenantVertical.toUpperCase()}) cannot access the LMIS Pathology Diagnostic module.`,
+          code: 'VERTICAL_ERP_MODULE_MISMATCH',
+          requiredVertical: 'lmis',
+          currentVertical: tenantVertical
+        });
+      }
+
+      // 2. ImpoExpo Global Trade & CHA Customs Module Guard
+      if (fullUrl.startsWith('/api/import-export') && tenantVertical !== 'impoexpo' && tenantVertical !== 'exim') {
+        return res.status(403).json({
+          error: `Vertical ERP Isolation Enforced: Your organization edition (${tenantVertical.toUpperCase()}) cannot access the ImpoExpo Trade & CHA Customs module.`,
+          code: 'VERTICAL_ERP_MODULE_MISMATCH',
+          requiredVertical: 'impoexpo',
+          currentVertical: tenantVertical
+        });
+      }
+
       return next();
     }
 
