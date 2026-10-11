@@ -784,6 +784,144 @@ function initDatabase() {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
     );
+
+    -- ========================================================
+    -- TRUE LANDED COST ENGINE (FINANCE & BILLING)
+    -- ========================================================
+    CREATE TABLE IF NOT EXISTS exim_landed_costs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      shipment_id INTEGER,
+      shipment_number TEXT NOT NULL,
+      invoice_number TEXT NOT NULL,
+      currency TEXT DEFAULT 'USD',
+      exchange_rate_booking REAL NOT NULL DEFAULT 84.50,
+      exchange_rate_customs REAL NOT NULL DEFAULT 84.80,
+      fob_cif_value_fcy REAL NOT NULL,
+      fob_cif_value_inr REAL NOT NULL,
+      ocean_air_freight_inr REAL DEFAULT 0,
+      marine_insurance_inr REAL DEFAULT 0,
+      terminal_handling_inr REAL DEFAULT 0,  -- THC / CFS
+      basic_customs_duty_inr REAL DEFAULT 0, -- BCD
+      sws_surcharge_inr REAL DEFAULT 0,      -- SWS (10% of BCD)
+      igst_tax_inr REAL DEFAULT 0,           -- IGST
+      inland_transport_inr REAL DEFAULT 0,
+      other_clearance_inr REAL DEFAULT 0,
+      total_landed_cost_inr REAL NOT NULL,
+      total_quantity REAL DEFAULT 1,
+      landed_cost_per_unit REAL NOT NULL,
+      selling_rate_unit REAL DEFAULT 0,
+      gross_profit_spread REAL DEFAULT 0,
+      allocation_method TEXT DEFAULT 'value_pct', -- 'value_pct', 'weight_kg', 'quantity'
+      status TEXT DEFAULT 'finalized',       -- 'estimated', 'finalized', 'audited'
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+      FOREIGN KEY (shipment_id) REFERENCES exim_shipments(id) ON DELETE SET NULL
+    );
+
+    -- ========================================================
+    -- FOREX LOSS/GAIN BOOKING LEDGER (FINANCE)
+    -- ========================================================
+    CREATE TABLE IF NOT EXISTS exim_fx_ledger (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      shipment_number TEXT NOT NULL,
+      invoice_number TEXT NOT NULL,
+      currency TEXT DEFAULT 'USD',
+      fcy_amount REAL NOT NULL,
+      booking_date TEXT NOT NULL,
+      booking_rate REAL NOT NULL,
+      booking_inr REAL NOT NULL,
+      settlement_date TEXT NOT NULL,
+      settlement_rate REAL NOT NULL,
+      settlement_inr REAL NOT NULL,
+      fx_gain_loss_inr REAL NOT NULL,        -- Positive = Gain, Negative = Loss
+      booking_type TEXT DEFAULT 'REALIZED',  -- 'UNREALIZED_MTM', 'REALIZED'
+      notes TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    );
+
+    -- ========================================================
+    -- CONTAINER MILESTONE MATRIX & DEMURRAGE TRACKER (TRACKING & WMS)
+    -- ========================================================
+    CREATE TABLE IF NOT EXISTS exim_containers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      container_number TEXT NOT NULL,        -- e.g. 'MSKU-908123-4'
+      container_size_type TEXT DEFAULT '40HC', -- '20GP', '40GP', '40HC', '40RF'
+      shipment_id INTEGER,
+      shipment_number TEXT,
+      carrier_line TEXT NOT NULL,            -- 'Maersk Line', 'MSC', 'Hapag-Lloyd', 'CMA CGM'
+      vessel_name TEXT,
+      voyage_no TEXT,
+      current_milestone TEXT DEFAULT 'port_arrived', -- 'booking_confirmed', 'gate_in_origin', 'vessel_departed', 'port_arrived', 'customs_hold', 'cfs_destuffed', 'delivered'
+      origin_port TEXT,
+      discharge_port TEXT,
+      current_location TEXT,
+      gate_in_origin_date TEXT,
+      sailing_date TEXT,
+      discharge_date TEXT,                   -- Port arrival / vessel discharge
+      ooc_date TEXT,                         -- Out of Charge
+      delivered_date TEXT,
+      shipping_line_free_days INTEGER DEFAULT 14,
+      cfs_free_days INTEGER DEFAULT 3,
+      daily_demurrage_rate_usd REAL DEFAULT 65.00,
+      daily_demurrage_rate_inr REAL DEFAULT 5500.00,
+      accrued_demurrage_usd REAL DEFAULT 0,
+      accrued_demurrage_inr REAL DEFAULT 0,
+      demurrage_status TEXT DEFAULT 'safe',  -- 'safe', 'approaching_expiry', 'overdue_penalty'
+      notes TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+      FOREIGN KEY (shipment_id) REFERENCES exim_shipments(id) ON DELETE SET NULL
+    );
+
+    -- ========================================================
+    -- PRE-FILING CHECKLIST VERIFICATION (CUSTOMS & COMPLIANCE)
+    -- ========================================================
+    CREATE TABLE IF NOT EXISTS exim_checklists (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      shipment_id INTEGER,
+      shipment_number TEXT NOT NULL,
+      clearance_type TEXT NOT NULL,          -- 'IMPORT_BOE', 'EXPORT_SB'
+      document_ref_no TEXT NOT NULL,         -- Draft BoE / Shipping Bill No
+      cha_agency_name TEXT,
+      cha_verifier_name TEXT,
+      iec_ad_code_verified INTEGER DEFAULT 1,
+      hsn_classification_verified INTEGER DEFAULT 1,
+      invoice_packing_list_match INTEGER DEFAULT 1,
+      origin_cert_verified INTEGER DEFAULT 1,
+      fssai_adc_noc_verified INTEGER DEFAULT 1,
+      customs_duty_assessed_verified INTEGER DEFAULT 1,
+      status TEXT DEFAULT 'verified_by_cha', -- 'draft', 'pending_cha_review', 'verified_by_cha', 'approved_for_filing', 'icegate_filed'
+      verified_at TEXT,
+      remarks TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+      FOREIGN KEY (shipment_id) REFERENCES exim_shipments(id) ON DELETE SET NULL
+    );
+
+    -- ========================================================
+    -- SECURE DOCUMENT MANAGEMENT SYSTEM (DMS)
+    -- ========================================================
+    CREATE TABLE IF NOT EXISTS exim_documents (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      shipment_number TEXT NOT NULL,
+      doc_category TEXT NOT NULL,            -- 'bill_of_lading', 'shipping_bill', 'bill_of_entry', 'commercial_invoice', 'packing_list', 'origin_cert', 'fssai_cert', 'insurance_policy'
+      doc_title TEXT NOT NULL,
+      file_name TEXT NOT NULL,
+      file_size_kb INTEGER DEFAULT 120,
+      uploaded_by_name TEXT NOT NULL,
+      uploaded_by_role TEXT NOT NULL,        -- 'cha_agent', 'accountant', 'logistics', 'super_admin'
+      verification_status TEXT DEFAULT 'verified', -- 'pending', 'verified', 'flagged'
+      verified_by TEXT,
+      notes TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    );
   `);
 
   ensureTenantColumns();
@@ -2000,6 +2138,252 @@ function seedTenantImportExportData(tenantId) {
         '2026-10-08',
         'closed',
         'not_applicable'
+      );
+    }
+
+    // Seed the 4 Organization Personas for EXIM Tenant
+    const personaUsers = [
+      { email: 'admin@transglobalexim.com', name: 'Vikram Malhotra (Super Admin)', role: 'super_admin', pass: 'Admin@123', pin: '1122' },
+      { email: 'accountant@transglobalexim.com', name: 'Sunil Narang (Chief Accountant)', role: 'accountant', pass: 'Accounts@123', pin: '3344' },
+      { email: 'logistics@transglobalexim.com', name: 'Ananya Deshmukh (Logistics Exec)', role: 'logistics', pass: 'Logistics@123', pin: '7788' },
+      { email: 'cha@transglobalexim.com', name: 'Rajesh Sharma (CHA Partner)', role: 'cha_agent', pass: 'ChaBroker@123', pin: '5566' }
+    ];
+
+    const checkUser = db.prepare('SELECT id FROM users WHERE email = ?');
+    const insUser = db.prepare("INSERT INTO users (tenant_id, name, email, password_hash, role, pin_code, status) VALUES (?, ?, ?, ?, ?, ?, 'active')");
+    const updUser = db.prepare("UPDATE users SET tenant_id = ?, name = ?, role = ?, pin_code = ?, status = 'active' WHERE email = ?");
+
+    for (const u of personaUsers) {
+      const existing = checkUser.get(u.email);
+      if (!existing) {
+        insUser.run(tenantId, u.name, u.email, bcrypt.hashSync(u.pass, 10), u.role, u.pin);
+      } else {
+        updUser.run(tenantId, u.name, u.role, u.pin, u.email);
+      }
+    }
+
+    // Seed True Landed Cost Engine
+    const landedCount = db.prepare('SELECT COUNT(*) as count FROM exim_landed_costs WHERE tenant_id = ?').get(tenantId).count;
+    if (landedCount === 0) {
+      const insLanded = db.prepare(`
+        INSERT INTO exim_landed_costs (
+          tenant_id, shipment_id, shipment_number, invoice_number, currency,
+          exchange_rate_booking, exchange_rate_customs, fob_cif_value_fcy, fob_cif_value_inr,
+          ocean_air_freight_inr, marine_insurance_inr, terminal_handling_inr, basic_customs_duty_inr,
+          sws_surcharge_inr, igst_tax_inr, inland_transport_inr, other_clearance_inr,
+          total_landed_cost_inr, total_quantity, landed_cost_per_unit, selling_rate_unit,
+          gross_profit_spread, allocation_method, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      const ship1 = db.prepare("SELECT id FROM exim_shipments WHERE tenant_id = ? AND trade_type = 'IMPORT' LIMIT 1").get(tenantId);
+
+      // Item 1: Bulk Pharma Intermediate (Nhava Sheva Sea Port)
+      insLanded.run(
+        tenantId,
+        ship1 ? ship1.id : null,
+        'IMP-2026-0042',
+        'INV-MRK-90812',
+        'USD',
+        84.50,
+        84.80,
+        42500.00,
+        3591250.00,
+        185000.00,
+        18000.00,
+        34500.00,
+        269343.00,
+        26934.00,
+        703985.00,
+        28000.00,
+        0.00,
+        4857012.00,
+        5000,
+        971.40,
+        1450.00,
+        478.60,
+        'value_pct',
+        'finalized'
+      );
+
+      // Item 2: Tokyo Chemical API Intermediates (Air Cargo Sahar)
+      insLanded.run(
+        tenantId,
+        null,
+        'IMP-2026-0078',
+        'INV-TKY-44102',
+        'USD',
+        84.20,
+        84.50,
+        18400.00,
+        1554800.00,
+        142000.00,
+        9200.00,
+        18500.00,
+        116610.00,
+        11661.00,
+        304600.00,
+        12000.00,
+        0.00,
+        2169371.00,
+        2000,
+        1084.68,
+        1600.00,
+        515.32,
+        'value_pct',
+        'finalized'
+      );
+    }
+
+    // Seed Forex Loss/Gain Ledger
+    const fxCount = db.prepare('SELECT COUNT(*) as count FROM exim_fx_ledger WHERE tenant_id = ?').get(tenantId).count;
+    if (fxCount === 0) {
+      const insFx = db.prepare(`
+        INSERT INTO exim_fx_ledger (
+          tenant_id, shipment_number, invoice_number, currency, fcy_amount,
+          booking_date, booking_rate, booking_inr, settlement_date, settlement_rate, settlement_inr,
+          fx_gain_loss_inr, booking_type, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      insFx.run(
+        tenantId, 'EXP-26-000001', 'EXP-INV-2026-081', 'USD', 48500.00,
+        '2026-09-15', 84.10, 4078850.00, '2026-10-08', 84.50, 4098250.00,
+        19400.00, 'REALIZED', 'Realized FX gain booked on HDFC Overseas Bank e-BRC inward realization.'
+      );
+
+      insFx.run(
+        tenantId, 'EXP-26-000002', 'EXP-26-000001', 'AED', 18500.00,
+        '2026-09-20', 22.80, 421800.00, '2026-10-09', 23.05, 426425.00,
+        4625.00, 'REALIZED', 'Realized FX gain booked on SBI Forex branch inward Dubai remittance.'
+      );
+
+      insFx.run(
+        tenantId, 'IMP-2026-0042', 'INV-MRK-90812', 'USD', 42500.00,
+        '2026-09-10', 84.15, 3576375.00, '2026-10-04', 84.65, 3597625.00,
+        -21250.00, 'REALIZED', 'Realized FX loss incurred on supplier import payment via wire transfer.'
+      );
+    }
+
+    // Seed Container Milestone Matrix & Demurrage
+    const contCount = db.prepare('SELECT COUNT(*) as count FROM exim_containers WHERE tenant_id = ?').get(tenantId).count;
+    if (contCount === 0) {
+      const insCont = db.prepare(`
+        INSERT INTO exim_containers (
+          tenant_id, container_number, container_size_type, shipment_number, carrier_line,
+          vessel_name, voyage_no, current_milestone, origin_port, discharge_port, current_location,
+          gate_in_origin_date, sailing_date, discharge_date, ooc_date, delivered_date,
+          shipping_line_free_days, cfs_free_days, daily_demurrage_rate_usd, daily_demurrage_rate_inr,
+          accrued_demurrage_usd, accrued_demurrage_inr, demurrage_status, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      // Container 1: Safe (10 days remaining)
+      insCont.run(
+        tenantId, 'MSKU-908123-4', '40HC', 'IMP-2026-0042', 'Maersk Line',
+        'Maersk Mc-Kinney Moller', 'V.2610E', 'customs_hold', 'Hamburg Port', 'Nhava Sheva (INNSA1)',
+        'Gateway Distriparks CFS, Nhava Sheva',
+        '2026-09-12', '2026-09-15', '2026-10-07', '2026-10-09', null,
+        14, 3, 65.00, 5500.00,
+        0.00, 0.00, 'safe', 'Cargo cleared customs examination. In CFS yard awaiting factory carting.'
+      );
+
+      // Container 2: Approaching Expiry (2 days remaining)
+      insCont.run(
+        tenantId, 'MEDU-441092-8', '40HC', 'IMP-2026-0055', 'MSC Mediterranean',
+        'MSC Oscar', 'V.9011W', 'port_arrived', 'Jebel Ali Port', 'Mundra Port (INMUN1)',
+        'Adani Mundra International Container Terminal',
+        '2026-09-22', '2026-09-25', '2026-09-29', null, null,
+        14, 3, 75.00, 6300.00,
+        0.00, 0.00, 'approaching_expiry', 'Discharge complete 12 days ago. Free time expires in 2 days. Urgent destuffing required!'
+      );
+
+      // Container 3: Overdue Penalty (4 days penalty incurred)
+      insCont.run(
+        tenantId, 'HLCU-772910-1', '20GP', 'IMP-2026-0031', 'Hapag-Lloyd',
+        'Antwerpen Express', 'V.4402', 'customs_hold', 'Antwerp Port', 'ICD Tughlakabad (INTKD6)',
+        'CONCOR TKD Dry Port Rail Siding',
+        '2026-09-02', '2026-09-06', '2026-09-23', null, null,
+        14, 3, 65.00, 5500.00,
+        260.00, 22000.00, 'overdue_penalty', 'Container has exceeded 14 shipping line free days by 4 days. Detention liability accruing at $65/day.'
+      );
+    }
+
+    // Seed Pre-Filing Checklists
+    const chkCount = db.prepare('SELECT COUNT(*) as count FROM exim_checklists WHERE tenant_id = ?').get(tenantId).count;
+    if (chkCount === 0) {
+      const insChk = db.prepare(`
+        INSERT INTO exim_checklists (
+          tenant_id, shipment_number, clearance_type, document_ref_no, cha_agency_name,
+          cha_verifier_name, iec_ad_code_verified, hsn_classification_verified, invoice_packing_list_match,
+          origin_cert_verified, fssai_adc_noc_verified, customs_duty_assessed_verified, status,
+          verified_at, remarks
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      insChk.run(
+        tenantId, 'IMP-2026-0042', 'IMPORT_BOE', 'BOE-8912044', 'Maritime & Cargo Customs Brokers LLP',
+        'Rajesh Sharma (Rule 6 Certified CHA)', 1, 1, 1, 1, 1, 1, 'icegate_filed',
+        '2026-10-02 14:30:00', 'Pre-filing checklist 100% verified. Drug Controller NOC verified on ICEGATE Single Window. OOC issued.'
+      );
+
+      insChk.run(
+        tenantId, 'EXP-26-000001', 'EXPORT_SB', 'SB-7190281', 'Maritime & Cargo Customs Brokers LLP',
+        'Rajesh Sharma (Rule 6 Certified CHA)', 1, 1, 1, 1, 1, 1, 'approved_for_filing',
+        '2026-10-07 11:15:00', 'Export checklist approved under GST LUT bond. Shipping Bill generated and Let Export Order LEO issued.'
+      );
+
+      insChk.run(
+        tenantId, 'IMP-2026-0078', 'IMPORT_BOE', 'BOE-8945112', 'Maritime & Cargo Customs Brokers LLP',
+        'Rajesh Sharma (Rule 6 Certified CHA)', 1, 1, 1, 1, 0, 1, 'pending_cha_review',
+        '2026-10-10 16:45:00', 'Commercial invoice matches packing list. ADC (Assistant Drug Controller) physical inspection pending.'
+      );
+    }
+
+    // Seed Secure DMS Documents
+    const docCount = db.prepare('SELECT COUNT(*) as count FROM exim_documents WHERE tenant_id = ?').get(tenantId).count;
+    if (docCount === 0) {
+      const insDoc = db.prepare(`
+        INSERT INTO exim_documents (
+          tenant_id, shipment_number, doc_category, doc_title, file_name,
+          file_size_kb, uploaded_by_name, uploaded_by_role, verification_status, verified_by, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      insDoc.run(
+        tenantId, 'IMP-2026-0042', 'bill_of_lading', 'Master Ocean Bill of Lading (Maersk)',
+        'BL-MAEU-9081234.pdf', 385, 'Ananya Deshmukh', 'logistics', 'verified', 'Rajesh Sharma (CHA)',
+        'Original negotiable Bill of Lading endorsed and surrendered for Delivery Order.'
+      );
+
+      insDoc.run(
+        tenantId, 'IMP-2026-0042', 'bill_of_entry', 'Customs Bill of Entry (Out of Charge)',
+        'BOE-8912044-OOC.pdf', 412, 'Rajesh Sharma', 'cha_agent', 'verified', 'Customs Appraiser Gr-II',
+        'Signed Out of Charge (OOC) copy downloaded from ICEGATE portal.'
+      );
+
+      insDoc.run(
+        tenantId, 'IMP-2026-0042', 'commercial_invoice', 'Merck KGaA Commercial Invoice',
+        'INV-MRK-90812.pdf', 218, 'Sunil Narang', 'accountant', 'verified', 'Rajesh Sharma (CHA)',
+        'Original signed Commercial Invoice with CIF valuation.'
+      );
+
+      insDoc.run(
+        tenantId, 'EXP-26-000001', 'shipping_bill', 'Export Shipping Bill (Let Export Order)',
+        'SB-7190281-LEO.pdf', 290, 'Rajesh Sharma', 'cha_agent', 'verified', 'Superintendent of Customs',
+        'LEO Shipping Bill stamped under zero-rated export LUT bond.'
+      );
+
+      insDoc.run(
+        tenantId, 'EXP-26-000001', 'fssai_cert', 'Central FSSAI Export Compliance Certificate',
+        'FSSAI-EXP-10022026001928.pdf', 184, 'Ananya Deshmukh', 'logistics', 'verified', 'FSSAI Port Officer',
+        'Section 23 statutory compliance certificate for health powders & botanicals.'
+      );
+
+      insDoc.run(
+        tenantId, 'EXP-26-000001', 'origin_cert', 'Chamber of Commerce Certificate of Origin',
+        'COO-IN-2026-88192.pdf', 145, 'Ananya Deshmukh', 'logistics', 'verified', 'FIEO Trade Desk',
+        'Non-preferential Certificate of Origin for Dubai Port customs entry.'
       );
     }
   } catch (err) {

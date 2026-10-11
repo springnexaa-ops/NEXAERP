@@ -270,6 +270,38 @@ export const api = {
   setDefaultCustomsPort: (id) => request(`/import-export/ports/${id}/default`, { method: 'PUT' }),
   deleteCustomsPort: (id) => request(`/import-export/ports/${id}`, { method: 'DELETE' }),
 
+  // True Landed Cost Engine & Forex Ledger (Finance & Billing - Accounts)
+  getLandedCosts: (role) => request('/import-export/landed-costs', { headers: role ? { 'x-user-role': role } : {} }),
+  createLandedCost: (data, role) => request('/import-export/landed-costs', { method: 'POST', body: JSON.stringify(data), headers: role ? { 'x-user-role': role } : {} }),
+  getFxLedger: (role) => request('/import-export/fx-ledger', { headers: role ? { 'x-user-role': role } : {} }),
+
+  // Container Milestone Matrix & Demurrage Tracker (Tracking & WMS - Logistics)
+  getContainers: () => request('/import-export/containers'),
+  createContainer: (data) => request('/import-export/containers', { method: 'POST', body: JSON.stringify(data) }),
+  updateContainerMilestone: (id, milestone, notes) => request(`/import-export/containers/${id}/milestone`, { method: 'PUT', body: JSON.stringify({ milestone, notes }) }),
+
+  // Customs Pre-Filing Checklist Verification (Customs & Compliance - CHA / Super Admin)
+  getChecklists: (chaAgency) => {
+    const q = chaAgency ? `?cha_agency=${encodeURIComponent(chaAgency)}` : '';
+    return request(`/import-export/checklists${q}`);
+  },
+  createChecklist: (data) => request('/import-export/checklists', { method: 'POST', body: JSON.stringify(data) }),
+  verifyChecklist: (id, data) => request(`/import-export/checklists/${id}/verify`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  // Secure Document Management System (DMS)
+  getDmsDocuments: (shipmentNumber, docCategory) => {
+    const params = new URLSearchParams();
+    if (shipmentNumber) params.append('shipment', shipmentNumber);
+    if (docCategory) params.append('category', docCategory);
+    const q = params.toString() ? `?${params.toString()}` : '';
+    return request(`/import-export/documents${q}`);
+  },
+  uploadDmsDocument: (data) => request('/import-export/documents', { method: 'POST', body: JSON.stringify(data) }),
+
+  // System Configuration & User Provisioning (RBAC Personas - Super Admin)
+  getEximUsers: () => request('/import-export/users'),
+  createEximUser: (data) => request('/import-export/users', { method: 'POST', body: JSON.stringify(data) }),
+
   // Settings & Backups (Tenant Scoped)
   getSettings: () => request('/settings'),
   updateSettings: (data) => request('/settings', { method: 'POST', body: JSON.stringify(data) }),

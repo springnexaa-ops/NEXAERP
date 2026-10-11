@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { db } = require('../db');
 const { checkProductQuota } = require('../utils/quotaGuard');
+const bcrypt = require('bcryptjs');
 
 // ========================================================
 // RFC 4180 COMPLIANT CSV PARSER & STRINGIFIER
@@ -2724,6 +2725,528 @@ router.delete('/ports/:id', (req, res) => {
 
     res.json({ success: true, message: 'Customs Port removed successfully' });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ========================================================
+// 11. TRUE LANDED COST ENGINE (FINANCE & BILLING)
+// ========================================================
+
+// 11.1 List Landed Cost Calculations (RBAC Protected)
+router.get('/landed-costs', (req, res) => {
+  try {
+    const tenantId = req.tenantId;
+    if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
+
+    // RBAC: Check if role is CHA partner
+    const userRole = (req.user && req.user.role) || req.headers['x-user-role'];
+    if (userRole === 'cha_agent') {
+      return res.status(403).json({
+        error: 'RBAC_ACCESS_DENIED',
+        message: 'Customs House Agents are restricted from accessing financial ledgers and landed cost calculations.'
+      });
+    }
+
+    const records = db.prepare(`
+      SELECT * FROM exim_landed_costs
+      WHERE tenant_id = ?
+      ORDER BY id DESC
+    `).all(tenantId);
+
+    let totalCifInr = 0;
+    let totalDutyInr = 0;
+    let totalFreightThcInr = 0;
+    let totalLandedInr = 0;
+
+    records.forEach(r => {
+      totalCifInr += Number(r.fob_cif_value_inr) || 0;
+      totalDutyInr += (Number(r.basic_customs_duty_inr) || 0) + (Number(r.sws_surcharge_inr) || 0) + (Number(r.igst_tax_inr) || 0);
+      totalFreightThcInr += (Number(r.ocean_air_freight_inr) || 0) + (Number(r.terminal_handling_inr) || 0);
+      totalLandedInr += Number(r.total_landed_cost_inr) || 0;
+    });
+
+    res.json({
+      records,
+      stats: {
+        total_calculations: records.length,
+        total_cif_inr: totalCifInr,
+        total_duty_inr: totalDutyInr,
+        total_freight_thc_inr: totalFreightThcInr,
+        total_landed_inr: totalLandedInr,
+        avg_duty_overhead_pct: totalCifInr > 0 ? ((totalDutyInr / totalCifInr) * 100).toFixed(1) : '0.0'
+      }
+    });
+  } catch (err) {
+    console.error('Error in /landed-costs:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 11.2 Compute & Save True Landed Cost
+router.post('/landed-costs', (req, res) => {
+  try {
+    const tenantId = req.tenantId;
+    if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
+
+    const userRole = (req.user && req.user.role) || req.headers['x-user-role'];
+    if (userRole === 'cha_agent') {
+      return res.status(403).json({ error: 'RBAC_ACCESS_DENIED: Financial modifications require Accountant or Super Admin privileges' });
+    }
+
+    const {
+      shipment_id,
+      shipment_number,
+      invoice_number,
+      currency = 'USD',
+      exchange_rate_booking = 84.50,
+      exchange_rate_customs = 84.80,
+      fob_cif_value_fcy,
+      ocean_air_freight_inr = 0,
+      marine_insurance_inr = 0,
+      terminal_handling_inr = 0,
+      bcd_rate_pct = 7.5,
+      igst_rate_pct = 18.0,
+      inland_transport_inr = 0,
+      other_clearance_inr = 0,
+      total_quantity = 1,
+      selling_rate_unit = 0,
+      allocation_method = 'value_pct'
+    } = req.body;
+
+    if (!shipment_number || !invoice_number || !fob_cif_value_fcy) {
+      return res.status(400).json({ error: 'Shipment Number, Invoice Number, and FCY Value are required' });
+    }
+
+    const fxCustoms = Number(exchange_rate_customs) || 84.80;
+    const fcyVal = Number(fob_cif_value_fcy);
+    const cifInr = fcyVal * fxCustoms;
+
+    // Standard Indian Customs Formula
+    const bcd = (cifInr * (Number(bcd_rate_pct) || 0)) / 100;
+    const sws = bcd * 0.10; // 10% Social Welfare Surcharge on BCD
+    const assessableForIgst = cifInr + bcd + sws;
+    const igst = (assessableForIgst * (Number(igst_rate_pct) || 0)) / 100;
+
+    const freight = Number(ocean_air_freight_inr) || 0;
+    const insurance = Number(marine_insurance_inr) || 0;
+    const thc = Number(terminal_handling_inr) || 0;
+    const inland = Number(inland_transport_inr) || 0;
+    const other = Number(other_clearance_inr) || 0;
+
+    const totalLandedCost = cifInr + freight + insurance + thc + bcd + sws + igst + inland + other;
+    const qty = Math.max(1, Number(total_quantity) || 1);
+    const costPerUnit = totalLandedCost / qty;
+    const sellRate = Number(selling_rate_unit) || 0;
+    const grossSpread = sellRate > 0 ? (sellRate - costPerUnit) : 0;
+
+    const insert = db.prepare(`
+      INSERT INTO exim_landed_costs (
+        tenant_id, shipment_id, shipment_number, invoice_number, currency,
+        exchange_rate_booking, exchange_rate_customs, fob_cif_value_fcy, fob_cif_value_inr,
+        ocean_air_freight_inr, marine_insurance_inr, terminal_handling_inr, basic_customs_duty_inr,
+        sws_surcharge_inr, igst_tax_inr, inland_transport_inr, other_clearance_inr,
+        total_landed_cost_inr, total_quantity, landed_cost_per_unit, selling_rate_unit,
+        gross_profit_spread, allocation_method, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'finalized')
+    `);
+
+    const result = insert.run(
+      tenantId,
+      shipment_id || null,
+      shipment_number.trim(),
+      invoice_number.trim(),
+      currency,
+      Number(exchange_rate_booking) || 84.50,
+      fxCustoms,
+      fcyVal,
+      cifInr,
+      freight,
+      insurance,
+      thc,
+      bcd,
+      sws,
+      igst,
+      inland,
+      other,
+      totalLandedCost,
+      qty,
+      costPerUnit,
+      sellRate,
+      grossSpread,
+      allocation_method
+    );
+
+    res.status(201).json({
+      success: true,
+      id: result.lastInsertRowid,
+      landed_cost_per_unit: costPerUnit,
+      total_landed_cost_inr: totalLandedCost,
+      message: `Landed cost calculated for ${shipment_number}: ₹${costPerUnit.toFixed(2)}/unit`
+    });
+  } catch (err) {
+    console.error('Error saving landed cost:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ========================================================
+// 12. FOREX LOSS/GAIN BOOKING LEDGER
+// ========================================================
+
+router.get('/fx-ledger', (req, res) => {
+  try {
+    const tenantId = req.tenantId;
+    if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
+
+    const userRole = (req.user && req.user.role) || req.headers['x-user-role'];
+    if (userRole === 'cha_agent') {
+      return res.status(403).json({ error: 'RBAC_ACCESS_DENIED: Financial FX data is restricted to Accountants only.' });
+    }
+
+    const records = db.prepare(`
+      SELECT * FROM exim_fx_ledger
+      WHERE tenant_id = ?
+      ORDER BY settlement_date DESC, id DESC
+    `).all(tenantId);
+
+    let totalGains = 0;
+    let totalLosses = 0;
+
+    records.forEach(r => {
+      const amt = Number(r.fx_gain_loss_inr) || 0;
+      if (amt >= 0) totalGains += amt;
+      else totalLosses += Math.abs(amt);
+    });
+
+    res.json({
+      records,
+      stats: {
+        total_transactions: records.length,
+        total_gains_inr: totalGains,
+        total_losses_inr: totalLosses,
+        net_fx_inr: totalGains - totalLosses
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ========================================================
+// 13. CONTAINER MILESTONE MATRIX & DEMURRAGE TRACKER
+// ========================================================
+
+router.get('/containers', (req, res) => {
+  try {
+    const tenantId = req.tenantId;
+    if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
+
+    const rawContainers = db.prepare(`
+      SELECT * FROM exim_containers
+      WHERE tenant_id = ?
+      ORDER BY id DESC
+    `).all(tenantId);
+
+    const now = new Date();
+    let safeCount = 0;
+    let warningCount = 0;
+    let penaltyCount = 0;
+    let totalAccruedUsd = 0;
+    let totalAccruedInr = 0;
+
+    const containers = rawContainers.map(c => {
+      let daysRemaining = c.shipping_line_free_days || 14;
+      let overdueDays = 0;
+      let status = c.demurrage_status || 'safe';
+      let accruedUsd = Number(c.accrued_demurrage_usd) || 0;
+      let accruedInr = Number(c.accrued_demurrage_inr) || 0;
+
+      if (c.discharge_date) {
+        const disDate = new Date(c.discharge_date);
+        const elapsedDays = Math.max(0, Math.floor((now - disDate) / (1000 * 60 * 60 * 24)));
+        const freeDays = c.shipping_line_free_days || 14;
+
+        if (elapsedDays > freeDays) {
+          overdueDays = elapsedDays - freeDays;
+          daysRemaining = 0;
+          status = 'overdue_penalty';
+          const dailyUsd = Number(c.daily_demurrage_rate_usd) || 65;
+          const dailyInr = Number(c.daily_demurrage_rate_inr) || 5500;
+          accruedUsd = overdueDays * dailyUsd;
+          accruedInr = overdueDays * dailyInr;
+        } else {
+          daysRemaining = freeDays - elapsedDays;
+          if (daysRemaining <= 3) {
+            status = 'approaching_expiry';
+          } else {
+            status = 'safe';
+          }
+        }
+      }
+
+      if (status === 'safe') safeCount++;
+      else if (status === 'approaching_expiry') warningCount++;
+      else if (status === 'overdue_penalty') penaltyCount++;
+
+      totalAccruedUsd += accruedUsd;
+      totalAccruedInr += accruedInr;
+
+      return {
+        ...c,
+        days_remaining: daysRemaining,
+        overdue_days: overdueDays,
+        demurrage_status: status,
+        accrued_demurrage_usd: accruedUsd,
+        accrued_demurrage_inr: accruedInr
+      };
+    });
+
+    res.json({
+      containers,
+      stats: {
+        total: containers.length,
+        safe: safeCount,
+        approaching_expiry: warningCount,
+        overdue_penalty: penaltyCount,
+        total_accrued_usd: totalAccruedUsd,
+        total_accrued_inr: totalAccruedInr
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update Container Milestone
+router.put('/containers/:id/milestone', (req, res) => {
+  try {
+    const tenantId = req.tenantId;
+    if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
+
+    const { milestone, current_location, ooc_date, delivered_date, notes } = req.body;
+
+    db.prepare(`
+      UPDATE exim_containers SET
+        current_milestone = COALESCE(?, current_milestone),
+        current_location = COALESCE(?, current_location),
+        ooc_date = COALESCE(?, ooc_date),
+        delivered_date = COALESCE(?, delivered_date),
+        notes = COALESCE(?, notes)
+      WHERE id = ? AND tenant_id = ?
+    `).run(
+      milestone ?? null,
+      current_location ?? null,
+      ooc_date ?? null,
+      delivered_date ?? null,
+      notes ?? null,
+      req.params.id,
+      tenantId
+    );
+
+    res.json({ success: true, message: 'Container milestone advanced successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ========================================================
+// 14. PRE-FILING CHECKLIST VERIFICATION (CUSTOMS & COMPLIANCE)
+// ========================================================
+
+router.get('/checklists', (req, res) => {
+  try {
+    const tenantId = req.tenantId;
+    if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
+
+    const checklists = db.prepare(`
+      SELECT * FROM exim_checklists
+      WHERE tenant_id = ?
+      ORDER BY id DESC
+    `).all(tenantId);
+
+    const verifiedCount = checklists.filter(c => c.status === 'verified_by_cha' || c.status === 'icegate_filed').length;
+    const pendingCount = checklists.filter(c => c.status === 'pending_cha_review' || c.status === 'draft').length;
+
+    res.json({
+      checklists,
+      stats: {
+        total: checklists.length,
+        verified: verifiedCount,
+        pending: pendingCount
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Verify Checklist by CHA Broker
+router.put('/checklists/:id/verify', (req, res) => {
+  try {
+    const tenantId = req.tenantId;
+    if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
+
+    const { cha_verifier_name = 'Rajesh Sharma (Rule 6 Certified CHA)', remarks } = req.body;
+
+    const result = db.prepare(`
+      UPDATE exim_checklists SET
+        status = 'verified_by_cha',
+        cha_verifier_name = ?,
+        iec_ad_code_verified = 1,
+        hsn_classification_verified = 1,
+        invoice_packing_list_match = 1,
+        origin_cert_verified = 1,
+        fssai_adc_noc_verified = 1,
+        customs_duty_assessed_verified = 1,
+        verified_at = CURRENT_TIMESTAMP,
+        remarks = COALESCE(?, remarks)
+      WHERE id = ? AND tenant_id = ?
+    `).run(cha_verifier_name, remarks ?? null, req.params.id, tenantId);
+
+    if (result.changes === 0) return res.status(404).json({ error: 'Checklist record not found' });
+
+    res.json({ success: true, message: 'Checklist verified by CHA. Ready for ICEGATE filing.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ========================================================
+// 15. SECURE DOCUMENT MANAGEMENT SYSTEM (DMS)
+// ========================================================
+
+router.get('/documents', (req, res) => {
+  try {
+    const tenantId = req.tenantId;
+    if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
+
+    const { shipment_number, category } = req.query;
+    let query = 'SELECT * FROM exim_documents WHERE tenant_id = ?';
+    const params = [tenantId];
+
+    if (shipment_number) {
+      query += ' AND shipment_number = ?';
+      params.push(shipment_number);
+    }
+    if (category && category !== 'all') {
+      query += ' AND doc_category = ?';
+      params.push(category);
+    }
+
+    query += ' ORDER BY id DESC';
+
+    const documents = db.prepare(query).all(...params);
+
+    res.json({
+      documents,
+      total: documents.length
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/documents', (req, res) => {
+  try {
+    const tenantId = req.tenantId;
+    if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
+
+    const {
+      shipment_number,
+      doc_category = 'commercial_invoice',
+      doc_title,
+      file_name,
+      file_size_kb = 180,
+      uploaded_by_name = 'Customs Team',
+      uploaded_by_role = 'logistics',
+      notes
+    } = req.body;
+
+    if (!shipment_number || !doc_title || !file_name) {
+      return res.status(400).json({ error: 'Shipment Number, Document Title, and File Name are required' });
+    }
+
+    const insert = db.prepare(`
+      INSERT INTO exim_documents (
+        tenant_id, shipment_number, doc_category, doc_title, file_name,
+        file_size_kb, uploaded_by_name, uploaded_by_role, verification_status, notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'verified', ?)
+    `);
+
+    const result = insert.run(
+      tenantId,
+      shipment_number.trim(),
+      doc_category,
+      doc_title.trim(),
+      file_name.trim(),
+      Number(file_size_kb) || 150,
+      uploaded_by_name,
+      uploaded_by_role,
+      notes || null
+    );
+
+    res.status(201).json({
+      success: true,
+      id: result.lastInsertRowid,
+      message: `Document ${file_name} attached to shipment ${shipment_number}`
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ========================================================
+// 16. USER PROVISIONING & SECURITY AUDIT (SYSTEM CONFIG)
+// ========================================================
+
+router.get('/users', (req, res) => {
+  try {
+    const tenantId = req.tenantId;
+    if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
+
+    const users = db.prepare(`
+      SELECT id, name, email, role, pin_code, status, last_login_at, created_at
+      FROM users
+      WHERE tenant_id = ?
+      ORDER BY id ASC
+    `).all(tenantId);
+
+    res.json({ users });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/users', (req, res) => {
+  try {
+    const tenantId = req.tenantId;
+    if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
+
+    const { name, email, role = 'logistics', password = 'Password@123', pin_code = '1234' } = req.body;
+
+    if (!name || !email) {
+      return res.status(400).json({ error: 'Name and email are required' });
+    }
+
+    const pHash = bcrypt.hashSync(password, 10);
+
+    const insert = db.prepare(`
+      INSERT INTO users (tenant_id, name, email, password_hash, role, pin_code, status)
+      VALUES (?, ?, ?, ?, ?, ?, 'active')
+    `);
+
+    const result = insert.run(tenantId, name.trim(), email.trim().toLowerCase(), pHash, role, pin_code);
+
+    res.status(201).json({
+      success: true,
+      id: result.lastInsertRowid,
+      message: `User ${name} provisioned with role ${role}`
+    });
+  } catch (err) {
+    if (err.message && err.message.includes('UNIQUE')) {
+      return res.status(400).json({ error: 'Email is already registered' });
+    }
     res.status(500).json({ error: err.message });
   }
 });
