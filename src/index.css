@@ -172,15 +172,19 @@ body.theme-midnight-slate {
   background: rgba(14, 165, 233, 0.8);
 }
 
-/* Print specific styles for Thermal 80mm and A4 */
+/* Print specific styles for Thermal 80mm, FSSAI Labels, and A4 */
 @media print {
   body * {
     visibility: hidden;
   }
-  #printable-receipt, #printable-receipt * {
+  #printable-receipt, #printable-receipt *,
+  #fssai-printable-label, #fssai-printable-label *,
+  #printable-lab-report, #printable-lab-report * {
     visibility: visible;
   }
-  #printable-receipt {
+  #printable-receipt,
+  #fssai-printable-label,
+  #printable-lab-report {
     position: absolute;
     left: 0;
     top: 0;

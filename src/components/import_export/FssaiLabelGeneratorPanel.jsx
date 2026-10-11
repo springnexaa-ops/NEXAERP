@@ -18,7 +18,10 @@ import {
   Leaf,
   Beef,
   AlertTriangle,
-  Info
+  Info,
+  Package,
+  Building2,
+  Maximize2
 } from 'lucide-react';
 
 const PRESET_TEMPLATES = [
@@ -53,9 +56,7 @@ const PRESET_TEMPLATES = [
       totalFat: '0.6 g',
       saturatedFat: '0.1 g',
       transFat: '0.0 g',
-      sodium: '9 mg',
-      iron: '2.8 mg',
-      calcium: '200 mg'
+      sodium: '9 mg'
     }
   },
   {
@@ -89,9 +90,7 @@ const PRESET_TEMPLATES = [
       totalFat: '0.5 g',
       saturatedFat: '0.1 g',
       transFat: '0.0 g',
-      sodium: '4 mg',
-      iron: '1.2 mg',
-      calcium: '18 mg'
+      sodium: '4 mg'
     }
   },
   {
@@ -125,9 +124,7 @@ const PRESET_TEMPLATES = [
       totalFat: '0.8 g',
       saturatedFat: '0.6 g',
       transFat: '0.0 g',
-      sodium: '12 mg',
-      iron: '1.5 mg',
-      calcium: '45 mg'
+      sodium: '12 mg'
     }
   }
 ];
@@ -138,7 +135,10 @@ export function FssaiLabelGeneratorPanel() {
 
   // Registered FSSAI licenses from database
   const [fssaiLicenses, setFssaiLicenses] = useState([]);
-  const [loadingLicenses, setLoadingLicenses] = useState(true);
+  // ERP Inventory Products from database
+  const [erpProducts, setErpProducts] = useState([]);
+  const [selectedProductId, setSelectedProductId] = useState('');
+  const [loadingInitial, setLoadingInitial] = useState(true);
 
   // Label Form Data
   const [formData, setFormData] = useState({
@@ -149,30 +149,50 @@ export function FssaiLabelGeneratorPanel() {
   });
 
   useEffect(() => {
-    loadRegisteredLicenses();
+    loadDatabaseEntities();
   }, []);
 
-  const loadRegisteredLicenses = async () => {
+  const loadDatabaseEntities = async () => {
     try {
-      setLoadingLicenses(true);
-      const res = await api.getDgftLicenses();
-      const licenses = res.licenses || [];
+      setLoadingInitial(true);
+      const [licRes, prodRes, setRes] = await Promise.all([
+        api.getDgftLicenses().catch(() => ({ licenses: [] })),
+        api.getProducts().catch(() => []),
+        api.getSettings().catch(() => ({}))
+      ]);
+
+      // 1. Process FSSAI Licenses
+      const licenses = licRes.licenses || [];
       const fssaiOnly = licenses.filter(
-        (l) => l.license_type && (l.license_type.startsWith('FSSAI') || l.license_number.length === 14)
+        (l) => l.license_type && (l.license_type.startsWith('FSSAI') || String(l.license_number).length === 14)
       );
       setFssaiLicenses(fssaiOnly);
 
-      if (fssaiOnly.length > 0) {
-        setFormData((prev) => ({
+      // 2. Process ERP Products
+      const prods = Array.isArray(prodRes) ? prodRes : prodRes.products || [];
+      setErpProducts(prods);
+
+      // 3. Process Settings for Default Exporter & Manufacturer
+      const storeName = setRes.store_name || setRes.tenant?.name || 'TransGlobal Cargo & EXIM Trade Corp';
+      const storeAddr = setRes.tenant?.store_address || 'Tower B, World Trade Center, Port Terminal Zone, Mumbai 400005';
+      const storeContact = `${setRes.tenant?.owner_phone || '+91 22 2724 4990'} | ${setRes.tenant?.owner_email || 'exports@transglobalexim.com'}`;
+
+      setFormData((prev) => {
+        const activeFssai = fssaiOnly.length > 0 ? fssaiOnly[0].license_number : prev.fssaiNumber;
+        const activeType = fssaiOnly.length > 0 ? (fssaiOnly[0].epc_name || (fssaiOnly[0].license_type === 'FSSAI_CENTRAL' ? 'Central Export License' : 'State Manufacturing License')) : prev.fssaiType;
+
+        return {
           ...prev,
-          fssaiNumber: fssaiOnly[0].license_number,
-          fssaiType: fssaiOnly[0].epc_name || (fssaiOnly[0].license_type === 'FSSAI_CENTRAL' ? 'Central Export License' : 'State Manufacturing License')
-        }));
-      }
+          fssaiNumber: activeFssai,
+          fssaiType: activeType,
+          marketedBy: `${storeName}, ${storeAddr}`,
+          customerCare: storeContact
+        };
+      });
     } catch (err) {
-      console.error('Error loading FSSAI licenses:', err);
+      console.error('Error loading initial data for FSSAI Label Studio:', err);
     } finally {
-      setLoadingLicenses(false);
+      setLoadingInitial(false);
     }
   };
 
@@ -181,7 +201,8 @@ export function FssaiLabelGeneratorPanel() {
       ...prev,
       ...tpl
     }));
-    showToast(`Loaded template: ${tpl.name}`, 'info');
+    setSelectedProductId('');
+    showToast(`Loaded preset template: ${tpl.name}`, 'info');
   };
 
   const handleSelectLicense = (licNum) => {
@@ -193,8 +214,397 @@ export function FssaiLabelGeneratorPanel() {
     }));
   };
 
+  const handleSelectProduct = (productId) => {
+    setSelectedProductId(productId);
+    if (!productId) return;
+
+    const prod = erpProducts.find((p) => String(p.id) === String(productId));
+    if (!prod) return;
+
+    const latestBatch = (prod.batches && prod.batches.length > 0) ? prod.batches[0] : null;
+
+    setFormData((prev) => ({
+      ...prev,
+      productName: prod.name,
+      brandName: prod.brand || prev.brandName,
+      category: prod.category || prev.category,
+      barcodeNumber: prod.barcode || prev.barcodeNumber,
+      netWeight: prod.pack_unit ? `1 Pack (${prod.pack_unit})` : prev.netWeight,
+      batchNumber: latestBatch?.batch_number || `BATCH-${new Date().getFullYear()}/01`,
+      mfgDate: latestBatch?.mfg_date || new Date().toISOString().split('T')[0],
+      expiryDate: latestBatch?.expiry_date || prod.earliest_expiry || '2028-12-31'
+    }));
+
+    showToast(`Loaded product data from ERP: ${prod.name}`, 'success');
+  };
+
+  // Dedicated Thermal Sticker Printing Engine (Guarantees Actual Data Prints Cleanly)
   const handlePrintLabel = () => {
-    window.print();
+    try {
+      const isVeg = formData.vegType === 'veg';
+      const emblemHtml = isVeg
+        ? `<div style="width:24px;height:24px;border:2px solid #15803d;display:flex;align-items:center;justify-content:center;background:#fff;border-radius:2px;">
+             <div style="width:14px;height:14px;background:#15803d;border-radius:50%;"></div>
+           </div>`
+        : `<div style="width:24px;height:24px;border:2px solid #8B4513;display:flex;align-items:center;justify-content:center;background:#fff;border-radius:2px;">
+             <div style="width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-bottom:14px solid #8B4513;"></div>
+           </div>`;
+
+      // Build Barcode Stripes
+      const barcodeLines = Array.from({ length: 42 }).map((_, i) => {
+        const w = (i % 4 === 0) ? 3 : (i % 2 === 0 ? 1.8 : 1);
+        const op = (i % 8 === 0) ? 0.3 : 1;
+        return `<span style="display:inline-block;height:32px;width:${w}px;background:#000;opacity:${op};margin-right:1px;"></span>`;
+      }).join('');
+
+      const printHtml = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <title>FSSAI Food Packaging Sticker - ${formData.productName}</title>
+            <style>
+              @page {
+                size: 100mm 150mm;
+                margin: 0;
+              }
+              @media print {
+                html, body {
+                  width: 100mm;
+                  min-height: 150mm;
+                  margin: 0;
+                  padding: 0;
+                  background: #fff !important;
+                  color: #000 !important;
+                  -webkit-print-color-adjust: exact;
+                  print-color-adjust: exact;
+                }
+                .label-wrapper {
+                  border: none !important;
+                  box-shadow: none !important;
+                }
+              }
+              body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+                margin: 0;
+                padding: 3mm;
+                box-sizing: border-box;
+                background: #fff;
+                color: #000;
+                font-size: 8.5px;
+                line-height: 1.25;
+              }
+              .label-wrapper {
+                width: 94mm;
+                min-height: 142mm;
+                padding: 3.5mm;
+                border: 2px solid #000;
+                box-sizing: border-box;
+                background: #fff;
+              }
+              .header {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                border-bottom: 2px solid #000;
+                padding-bottom: 2.5mm;
+                margin-bottom: 2mm;
+              }
+              .brand {
+                font-size: 10px;
+                font-weight: 900;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                color: #444;
+              }
+              .product-title {
+                font-size: 13px;
+                font-weight: 900;
+                text-transform: uppercase;
+                line-height: 1.1;
+                margin: 1mm 0 0.5mm 0;
+                color: #000;
+              }
+              .origin {
+                font-size: 8px;
+                font-weight: 700;
+                text-transform: uppercase;
+                color: #555;
+              }
+              .fssai-box {
+                text-align: right;
+                margin-top: 1.5mm;
+              }
+              .fssai-logo {
+                font-family: Georgia, serif;
+                font-style: italic;
+                font-weight: 900;
+                font-size: 13px;
+                line-height: 1;
+              }
+              .fssai-lic {
+                font-family: monospace;
+                font-size: 7.5px;
+                font-weight: bold;
+                margin-top: 0.5mm;
+              }
+              .batch-strip {
+                background: #f1f5f9;
+                border: 1px solid #cbd5e1;
+                border-radius: 2px;
+                padding: 1.5mm 2mm;
+                display: flex;
+                justify-content: space-between;
+                margin-bottom: 2mm;
+                font-family: monospace;
+              }
+              .batch-item label {
+                font-size: 7px;
+                text-transform: uppercase;
+                font-weight: bold;
+                display: block;
+                color: #64748b;
+                font-family: sans-serif;
+              }
+              .batch-item span {
+                font-size: 10px;
+                font-weight: 900;
+                color: #000;
+              }
+              .best-before {
+                font-size: 8px;
+                font-weight: bold;
+                margin-bottom: 2mm;
+              }
+              .section {
+                border-top: 1px solid #cbd5e1;
+                padding-top: 1.5mm;
+                margin-bottom: 2mm;
+              }
+              .section-title {
+                font-weight: 900;
+                text-transform: uppercase;
+                font-size: 8px;
+              }
+              .nutri-table {
+                width: 100%;
+                border-collapse: collapse;
+                border: 1px solid #000;
+                margin-bottom: 2mm;
+                font-size: 7.5px;
+              }
+              .nutri-head {
+                background: #1e293b;
+                color: #fff;
+                padding: 1mm 1.5mm;
+                font-weight: 900;
+                text-transform: uppercase;
+                display: flex;
+                justify-content: space-between;
+              }
+              .nutri-table td {
+                padding: 0.8mm 1.5mm;
+                border-bottom: 1px solid #e2e8f0;
+              }
+              .nutri-table tr td:nth-child(2),
+              .nutri-table tr td:nth-child(4) {
+                text-align: right;
+                font-family: monospace;
+              }
+              .nutri-table tr td:nth-child(3) {
+                border-left: 1px solid #e2e8f0;
+              }
+              .footer {
+                border-top: 2px solid #000;
+                padding-top: 2mm;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+              }
+              .barcode-container {
+                display: flex;
+                flex-direction: column;
+                align-items: flex-start;
+              }
+              .barcode-digits {
+                font-family: monospace;
+                font-size: 9px;
+                font-weight: bold;
+                letter-spacing: 1.5px;
+                margin-top: 0.5mm;
+              }
+              .qr-box {
+                border: 1px solid #000;
+                padding: 1mm;
+                text-align: center;
+              }
+              .qr-text {
+                font-size: 6.5px;
+                font-family: monospace;
+                margin-bottom: 0.5mm;
+                color: #444;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="label-wrapper">
+              <!-- Header -->
+              <div class="header">
+                <div>
+                  <div class="brand">${formData.brandName}</div>
+                  <div class="product-title">${formData.productName}</div>
+                  <div class="origin">${formData.origin}</div>
+                </div>
+                <div style="display:flex; flex-direction:column; align-items:flex-end;">
+                  ${emblemHtml}
+                  <div class="fssai-box">
+                    <div class="fssai-logo">fssai</div>
+                    <div class="fssai-lic">Lic. No. ${formData.fssaiNumber}</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Batch & Quantity Strip -->
+              <div class="batch-strip">
+                <div class="batch-item">
+                  <label>Net Quantity</label>
+                  <span>${formData.netWeight}</span>
+                </div>
+                <div class="batch-item" style="text-align:center;">
+                  <label>Batch / Lot No</label>
+                  <span>${formData.batchNumber}</span>
+                </div>
+                <div class="batch-item" style="text-align:right;">
+                  <label>Mfg Date</label>
+                  <span>${formData.mfgDate}</span>
+                </div>
+              </div>
+
+              <!-- Best Before -->
+              <div class="best-before">
+                BEST BEFORE: <span style="font-weight:900;">${formData.bestBeforeDuration}</span> (Expiry: ${formData.expiryDate})
+              </div>
+
+              <!-- Ingredients -->
+              <div class="section">
+                <span class="section-title">Ingredients: </span>
+                <span>${formData.ingredients}</span>
+                ${formData.allergens ? `<div style="font-size:7.5px;font-style:italic;margin-top:0.5mm;"><strong>Allergen Advice: </strong>${formData.allergens}</div>` : ''}
+              </div>
+
+              <!-- Nutritional Information Table -->
+              <div style="border: 1px solid #000; border-radius: 2px; overflow: hidden; margin-bottom: 2mm;">
+                <div class="nutri-head">
+                  <span>Nutritional Information</span>
+                  <span style="font-family:monospace;font-weight:normal;">Per Serving (${formData.nutrition.servingSize})</span>
+                </div>
+                <table class="nutri-table" style="margin-bottom:0; border:none;">
+                  <tbody>
+                    <tr>
+                      <td style="font-weight:bold;">Energy</td>
+                      <td style="font-weight:bold;">${formData.nutrition.energy}</td>
+                      <td style="font-weight:bold;">Total Fat</td>
+                      <td>${formData.nutrition.totalFat}</td>
+                    </tr>
+                    <tr>
+                      <td style="font-weight:bold;">Protein</td>
+                      <td>${formData.nutrition.protein}</td>
+                      <td style="font-weight:bold;">Saturated Fat</td>
+                      <td>${formData.nutrition.saturatedFat}</td>
+                    </tr>
+                    <tr>
+                      <td style="font-weight:bold;">Carbohydrates</td>
+                      <td>${formData.nutrition.carbohydrates}</td>
+                      <td style="font-weight:bold;">Trans Fat</td>
+                      <td style="font-weight:bold;">${formData.nutrition.transFat}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding-left:3mm;color:#475569;">- Total Sugars</td>
+                      <td>${formData.nutrition.totalSugars}</td>
+                      <td style="font-weight:bold;">Sodium</td>
+                      <td>${formData.nutrition.sodium}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding-left:3mm;color:#475569;">- Added Sugars</td>
+                      <td style="font-weight:bold;">${formData.nutrition.addedSugars}</td>
+                      <td style="font-weight:bold;">Dietary Fiber</td>
+                      <td>${formData.nutrition.dietaryFiber}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- Directions & Storage -->
+              <div class="section" style="font-size:7.5px;">
+                <div><span class="section-title">Directions for Use: </span>${formData.directions}</div>
+                <div style="margin-top:0.5mm;"><span class="section-title">Storage: </span>${formData.storage}</div>
+              </div>
+
+              <!-- Manufacturer & Exporter Details -->
+              <div class="section" style="font-size:7.5px; line-height:1.2;">
+                <div><strong>Manufactured & Packed by: </strong>${formData.mfgBy}</div>
+                <div style="margin-top:0.5mm;"><strong>Marketed & Exported by: </strong>${formData.marketedBy}</div>
+                <div style="margin-top:0.5mm;font-family:monospace;color:#334155;">Customer Helpline: ${formData.customerCare}</div>
+              </div>
+
+              <!-- Barcode & QR Code Footer -->
+              <div class="footer">
+                <div class="barcode-container">
+                  <div style="height:32px;display:flex;align-items:center;">
+                    ${barcodeLines}
+                  </div>
+                  <div class="barcode-digits">${formData.barcodeNumber}</div>
+                </div>
+
+                <div style="display:flex;align-items:center;gap:2mm;">
+                  <div style="text-align:right;font-family:monospace;font-size:6.5px;color:#475569;">
+                    <div>SCAN FOR ICEGATE</div>
+                    <div>& FSSAI TRACE</div>
+                  </div>
+                  <div class="qr-box">
+                    <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <rect width="5" height="5" x="3" y="3" rx="1"/>
+                      <rect width="5" height="5" x="16" y="3" rx="1"/>
+                      <rect width="5" height="5" x="3" y="16" rx="1"/>
+                      <path d="M21 16h-3a2 2 0 0 0-2 2v3"/>
+                      <path d="M21 21v.01"/>
+                      <path d="M12 7v3a2 2 0 0 1-2 2H7"/>
+                      <path d="M3 12h.01"/>
+                      <path d="M12 3h.01"/>
+                      <path d="M12 16v.01"/>
+                      <path d="M16 12h1"/>
+                      <path d="M21 12v.01"/>
+                      <path d="M12 21v-1"/>
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </body>
+        </html>
+      `;
+
+      // Open isolated print window
+      const printWin = window.open('', '_blank', 'width=750,height=900');
+      if (printWin) {
+        printWin.document.open();
+        printWin.document.write(printHtml);
+        printWin.document.close();
+        printWin.focus();
+
+        setTimeout(() => {
+          printWin.print();
+          printWin.close();
+        }, 350);
+        showToast('Sent actual FSSAI sticker data to thermal label printer!', 'success');
+      } else {
+        // Fallback to window.print if popup blocked
+        window.print();
+      }
+    } catch (err) {
+      console.error('Error printing FSSAI label:', err);
+      window.print();
+    }
   };
 
   const handleCopyBarcode = () => {
@@ -232,20 +642,50 @@ export function FssaiLabelGeneratorPanel() {
         </div>
       </div>
 
-      {/* 2. Quick Presets Bar */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar text-xs">
-        <span className="text-slate-400 font-semibold flex items-center gap-1.5 whitespace-nowrap pl-1">
-          <Sparkles className="w-3.5 h-3.5 text-amber-400" /> Presets:
-        </span>
-        {PRESET_TEMPLATES.map((tpl, i) => (
-          <button
-            key={i}
-            onClick={() => handleSelectTemplate(tpl)}
-            className="px-3 py-1.5 rounded-xl bg-slate-950/80 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white font-medium transition whitespace-nowrap"
-          >
-            {tpl.name}
-          </button>
-        ))}
+      {/* 2. ERP Inventory & Presets Quick Loader Bar */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-950/70 p-3.5 rounded-2xl border border-slate-800">
+        {/* Quick Load from Real ERP Inventory Products */}
+        <div className="flex items-center gap-2">
+          <Package className="w-4 h-4 text-sky-400 shrink-0" />
+          <div className="flex-1">
+            <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
+              Load Actual Product From ERP Inventory
+            </label>
+            <select
+              value={selectedProductId}
+              onChange={(e) => handleSelectProduct(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-700 hover:border-slate-600 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-sky-500"
+            >
+              <option value="">-- Select Inventory Product to Auto-Populate --</option>
+              {erpProducts.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} {p.brand ? `(${p.brand})` : ''} - {p.barcode || 'No Barcode'}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Presets List */}
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+          <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+          <div className="flex-1">
+            <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
+              Or Load Standard Export Presets
+            </label>
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+              {PRESET_TEMPLATES.map((tpl, i) => (
+                <button
+                  key={i}
+                  onClick={() => handleSelectTemplate(tpl)}
+                  className="px-2.5 py-1 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white font-medium text-[11px] transition whitespace-nowrap"
+                >
+                  {tpl.name.split(' (')[0]}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* 3. Main Studio: Controls (Left) & Live Preview (Right) */}
@@ -370,131 +810,135 @@ export function FssaiLabelGeneratorPanel() {
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div>
-                <label className="text-slate-300 block mb-1 font-semibold">Net Weight / Quantity *</label>
+                <label className="text-slate-300 block mb-1 font-semibold">Net Quantity *</label>
                 <input
                   type="text"
-                  required
                   value={formData.netWeight}
                   onChange={(e) => setFormData({ ...formData, netWeight: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-bold"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
+                  placeholder="e.g. 500 g"
                 />
               </div>
 
               <div>
-                <label className="text-slate-300 block mb-1 font-semibold">Batch / Lot Number *</label>
+                <label className="text-slate-300 block mb-1 font-semibold">Batch / Lot No *</label>
                 <input
                   type="text"
-                  required
                   value={formData.batchNumber}
                   onChange={(e) => setFormData({ ...formData, batchNumber: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-bold"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
+                  placeholder="e.g. BATCH-2026/01"
                 />
               </div>
 
               <div>
-                <label className="text-slate-300 block mb-1 font-semibold">EAN-13 / Barcode</label>
+                <label className="text-slate-300 block mb-1 font-semibold">Mfg Date *</label>
                 <input
-                  type="text"
-                  value={formData.barcodeNumber}
-                  onChange={(e) => setFormData({ ...formData, barcodeNumber: e.target.value })}
+                  type="date"
+                  value={formData.mfgDate}
+                  onChange={(e) => setFormData({ ...formData, mfgDate: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="text-slate-300 block mb-1 font-semibold">Expiry Date *</label>
+                <input
+                  type="date"
+                  value={formData.expiryDate}
+                  onChange={(e) => setFormData({ ...formData, expiryDate: e.target.value })}
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
                 />
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="text-slate-300 block mb-1 font-semibold">Mfg / Packing Date</label>
-                <input
-                  type="date"
-                  value={formData.mfgDate}
-                  onChange={(e) => setFormData({ ...formData, mfgDate: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white"
-                />
-              </div>
-
-              <div>
-                <label className="text-slate-300 block mb-1 font-semibold">Expiry Date</label>
-                <input
-                  type="date"
-                  value={formData.expiryDate}
-                  onChange={(e) => setFormData({ ...formData, expiryDate: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white"
-                />
-              </div>
-
-              <div>
-                <label className="text-slate-300 block mb-1 font-semibold">Best Before Statement</label>
+                <label className="text-slate-300 block mb-1 font-semibold">Best Before Notice</label>
                 <input
                   type="text"
                   value={formData.bestBeforeDuration}
                   onChange={(e) => setFormData({ ...formData, bestBeforeDuration: e.target.value })}
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white"
+                  placeholder="e.g. 24 Months from manufacture"
+                />
+              </div>
+
+              <div>
+                <label className="text-slate-300 block mb-1 font-semibold">Barcode EAN-13 / GTIN Number</label>
+                <input
+                  type="text"
+                  value={formData.barcodeNumber}
+                  onChange={(e) => setFormData({ ...formData, barcodeNumber: e.target.value.replace(/\D/g, '') })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
+                  placeholder="e.g. 8901048801923"
                 />
               </div>
             </div>
           </div>
 
-          {/* Card C: Ingredients, Allergen, Storage & Directions */}
+          {/* Card C: Ingredients, Allergens & Usage */}
           <div className="p-4 rounded-3xl bg-slate-950/80 border border-slate-800 space-y-3.5 text-xs">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
               <span className="font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-                <Utensils className="w-4 h-4 text-emerald-400" /> Ingredients, Allergens & Usage
+                <Utensils className="w-4 h-4 text-emerald-400" /> Ingredients, Allergens & Directions
               </span>
             </div>
 
             <div>
-              <label className="text-slate-300 block mb-1 font-semibold">List of Ingredients (Descending Order) *</label>
+              <label className="text-slate-300 block mb-1 font-semibold">Full Ingredients List (Descending Order) *</label>
               <textarea
                 rows="2"
                 value={formData.ingredients}
                 onChange={(e) => setFormData({ ...formData, ingredients: e.target.value })}
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white"
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white text-[11px]"
+                placeholder="List all ingredients in descending order of incoming weight..."
+              />
+            </div>
+
+            <div>
+              <label className="text-slate-300 block mb-1 font-semibold">Allergen Advice / Declaration</label>
+              <input
+                type="text"
+                value={formData.allergens}
+                onChange={(e) => setFormData({ ...formData, allergens: e.target.value })}
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white text-[11px]"
+                placeholder="e.g. Contains Gluten, Soy, Nuts..."
               />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="text-slate-300 block mb-1 font-semibold">Allergen Advisory Declaration</label>
-                <input
-                  type="text"
-                  value={formData.allergens}
-                  onChange={(e) => setFormData({ ...formData, allergens: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white"
+                <label className="text-slate-300 block mb-1 font-semibold">Directions for Use</label>
+                <textarea
+                  rows="2"
+                  value={formData.directions}
+                  onChange={(e) => setFormData({ ...formData, directions: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white text-[11px]"
                 />
               </div>
 
               <div>
                 <label className="text-slate-300 block mb-1 font-semibold">Storage Instructions</label>
-                <input
-                  type="text"
+                <textarea
+                  rows="2"
                   value={formData.storage}
                   onChange={(e) => setFormData({ ...formData, storage: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white text-[11px]"
                 />
               </div>
             </div>
-
-            <div>
-              <label className="text-slate-300 block mb-1 font-semibold">Directions for Use / Preparation</label>
-              <input
-                type="text"
-                value={formData.directions}
-                onChange={(e) => setFormData({ ...formData, directions: e.target.value })}
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white"
-              />
-            </div>
           </div>
 
-          {/* Card D: Nutritional Facts Table Editor */}
+          {/* Card D: Nutritional Information Table */}
           <div className="p-4 rounded-3xl bg-slate-950/80 border border-slate-800 space-y-3.5 text-xs">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
               <span className="font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-                <FileText className="w-4 h-4 text-amber-400" /> Mandatory Nutritional Facts (Per 100g / Serving)
+                <FileText className="w-4 h-4 text-amber-400" /> Statutory Nutritional Information
               </span>
-              <span className="text-[10px] text-slate-400 font-mono">FSSAI 2020 GUIDELINES</span>
+              <span className="text-[10px] text-slate-400 font-mono">FSSAI 2020 MANDATE</span>
             </div>
 
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2.5">
