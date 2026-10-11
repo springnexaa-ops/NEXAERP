@@ -257,6 +257,19 @@ export const api = {
   getBankRealizations: () => request('/import-export/realizations'),
   createBankRealization: (data) => request('/import-export/realizations', { method: 'POST', body: JSON.stringify(data) }),
 
+  // Customs Ports & ICDs Directory
+  getCustomsPorts: (params = {}) => {
+    const q = new URLSearchParams();
+    if (params.search) q.append('search', params.search);
+    if (params.type) q.append('type', params.type);
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return request(`/import-export/ports${qs}`);
+  },
+  createCustomsPort: (data) => request('/import-export/ports', { method: 'POST', body: JSON.stringify(data) }),
+  updateCustomsPort: (id, data) => request(`/import-export/ports/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  setDefaultCustomsPort: (id) => request(`/import-export/ports/${id}/default`, { method: 'PUT' }),
+  deleteCustomsPort: (id) => request(`/import-export/ports/${id}`, { method: 'DELETE' }),
+
   // Settings & Backups (Tenant Scoped)
   getSettings: () => request('/settings'),
   updateSettings: (data) => request('/settings', { method: 'POST', body: JSON.stringify(data) }),

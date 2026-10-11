@@ -12,6 +12,8 @@ import { DataExportPanel } from './DataExportPanel';
 import { EximTradePanel } from './EximTradePanel';
 import { CHACustomsPortalPanel } from './CHACustomsPortalPanel';
 import { DgftLicensesPanel } from './DgftLicensesPanel';
+import { PortsManagementPanel } from './PortsManagementPanel';
+import { FssaiLabelGeneratorPanel } from './FssaiLabelGeneratorPanel';
 import { JobAuditLogsPanel } from './JobAuditLogsPanel';
 import {
   Anchor,
@@ -32,7 +34,9 @@ import {
   Clock,
   Receipt,
   FileCheck2,
-  CheckCircle2
+  CheckCircle2,
+  Ship,
+  Utensils
 } from 'lucide-react';
 
 export function ImportExportScreen() {
@@ -119,6 +123,18 @@ export function ImportExportScreen() {
         </button>
 
         <button
+          onClick={() => setActiveSubTab('ports')}
+          className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
+            activeSubTab === 'ports'
+              ? 'bg-gradient-to-r from-sky-500 to-cyan-600 text-white shadow-md shadow-sky-600/30'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+          }`}
+        >
+          <Ship className="w-4 h-4 text-sky-300" />
+          <span>Customs Ports & ICDs</span>
+        </button>
+
+        <button
           onClick={() => setActiveSubTab('licenses')}
           className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
             activeSubTab === 'licenses'
@@ -127,7 +143,19 @@ export function ImportExportScreen() {
           }`}
         >
           <Award className="w-4 h-4 text-emerald-300" />
-          <span>DGFT Licenses & IEC</span>
+          <span>DGFT, RCMC & FSSAI</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('fssai_label')}
+          className={`flex items-center space-x-2 px-3.5 py-2 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
+            activeSubTab === 'fssai_label'
+              ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md shadow-emerald-600/30'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+          }`}
+        >
+          <Utensils className="w-4 h-4 text-emerald-300" />
+          <span>FSSAI Label Studio</span>
         </button>
 
         <button
@@ -256,8 +284,14 @@ export function ImportExportScreen() {
         {activeSubTab === 'cha' && (
           <CHACustomsPortalPanel />
         )}
+        {activeSubTab === 'ports' && (
+          <PortsManagementPanel />
+        )}
         {activeSubTab === 'licenses' && (
           <DgftLicensesPanel />
+        )}
+        {activeSubTab === 'fssai_label' && (
+          <FssaiLabelGeneratorPanel />
         )}
         {activeSubTab === 'billing' && (
           <SmartBillingPanel

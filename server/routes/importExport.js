@@ -1866,6 +1866,9 @@ router.get('/licenses', (req, res) => {
 
     // Compute summary analytics
     let activeCount = 0;
+    let rcmcCount = 0;
+    let fssaiCount = 0;
+    let qualityCount = 0;
     let aaObligationTotal = 0;
     let aaFulfilledTotal = 0;
     let epcgObligationTotal = 0;
@@ -1874,6 +1877,9 @@ router.get('/licenses', (req, res) => {
 
     licenses.forEach(l => {
       if (l.status === 'active') activeCount++;
+      if (l.license_type === 'RCMC') rcmcCount++;
+      if (l.license_type && l.license_type.startsWith('FSSAI')) fssaiCount++;
+      if (['BIS', 'CDSCO', 'AEO', 'LUT_GST'].includes(l.license_type)) qualityCount++;
       if (l.license_type === 'ADVANCE_AUTHORISATION') {
         aaObligationTotal += Number(l.fob_obligation_value) || 0;
         aaFulfilledTotal += Number(l.obligation_fulfilled_value) || 0;
@@ -1892,6 +1898,9 @@ router.get('/licenses', (req, res) => {
       stats: {
         total: licenses.length,
         active: activeCount,
+        rcmc_count: rcmcCount,
+        fssai_count: fssaiCount,
+        quality_count: qualityCount,
         aa_obligation_total: aaObligationTotal,
         aa_fulfilled_total: aaFulfilledTotal,
         epcg_obligation_total: epcgObligationTotal,
@@ -1979,9 +1988,15 @@ router.put('/licenses/:id', (req, res) => {
     if (!license) return res.status(404).json({ error: 'License record not found' });
 
     const {
+      license_number,
+      issuing_authority,
       status,
+      cif_value,
+      fob_obligation_value,
       obligation_fulfilled_value,
       scrip_balance,
+      epc_name,
+      dgft_file_number,
       eodc_status,
       expiry_date,
       notes
@@ -1989,17 +2004,29 @@ router.put('/licenses/:id', (req, res) => {
 
     db.prepare(`
       UPDATE exim_licenses SET
+        license_number = COALESCE(?, license_number),
+        issuing_authority = COALESCE(?, issuing_authority),
         status = COALESCE(?, status),
+        cif_value = COALESCE(?, cif_value),
+        fob_obligation_value = COALESCE(?, fob_obligation_value),
         obligation_fulfilled_value = COALESCE(?, obligation_fulfilled_value),
         scrip_balance = COALESCE(?, scrip_balance),
+        epc_name = COALESCE(?, epc_name),
+        dgft_file_number = COALESCE(?, dgft_file_number),
         eodc_status = COALESCE(?, eodc_status),
         expiry_date = COALESCE(?, expiry_date),
         notes = COALESCE(?, notes)
       WHERE id = ? AND tenant_id = ?
     `).run(
+      license_number ? license_number.trim() : null,
+      issuing_authority ?? null,
       status ?? null,
+      cif_value !== undefined ? Number(cif_value) : null,
+      fob_obligation_value !== undefined ? Number(fob_obligation_value) : null,
       obligation_fulfilled_value !== undefined ? Number(obligation_fulfilled_value) : null,
       scrip_balance !== undefined ? Number(scrip_balance) : null,
+      epc_name ?? null,
+      dgft_file_number ?? null,
       eodc_status ?? null,
       expiry_date ?? null,
       notes ?? null,
@@ -2477,6 +2504,225 @@ router.post('/realizations', (req, res) => {
       id: result.lastInsertRowid,
       message: `Bank Realisation (e-BRC) recorded for Shipping Bill ${shipping_bill_no}`
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ========================================================
+// 10. CUSTOMS PORTS & INLAND CONTAINER DEPOT (ICD) DIRECTORY
+// ========================================================
+
+// 10.1 List all Customs Ports & ICDs
+router.get('/ports', (req, res) => {
+  try {
+    const tenantId = req.tenantId;
+    if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
+
+    const { search, type } = req.query;
+    let query = 'SELECT * FROM customs_ports WHERE tenant_id = ?';
+    const params = [tenantId];
+
+    if (type && type !== 'all') {
+      query += ' AND port_type = ?';
+      params.push(type.toUpperCase());
+    }
+
+    if (search && search.trim()) {
+      const term = `%${search.trim()}%`;
+      query += ' AND (port_code LIKE ? OR port_name LIKE ? OR customs_zone LIKE ? OR custodian LIKE ? OR cfs_names LIKE ?)';
+      params.push(term, term, term, term, term);
+    }
+
+    query += ' ORDER BY is_default DESC, port_type ASC, port_code ASC';
+
+    const ports = db.prepare(query).all(...params);
+
+    // Summary counts
+    const seaCount = ports.filter(p => p.port_type === 'SEA').length;
+    const airCount = ports.filter(p => p.port_type === 'AIR').length;
+    const icdCount = ports.filter(p => p.port_type === 'ICD').length;
+    const activeCount = ports.filter(p => p.status === 'active').length;
+
+    res.json({
+      ports,
+      stats: {
+        total: ports.length,
+        sea: seaCount,
+        air: airCount,
+        icd: icdCount,
+        active: activeCount
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching customs ports:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 10.2 Create Customs Port or ICD
+router.post('/ports', (req, res) => {
+  try {
+    const tenantId = req.tenantId;
+    if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
+
+    const {
+      port_code,
+      port_name,
+      port_type = 'SEA',
+      customs_zone,
+      custodian,
+      icegate_enabled = 1,
+      cfs_names,
+      edi_version = 'ICEGATE 2.0',
+      contact_phone,
+      contact_email,
+      is_default = 0,
+      status = 'active'
+    } = req.body;
+
+    if (!port_code || !port_name) {
+      return res.status(400).json({ error: 'Port Code (e.g. INNSA1) and Port Name are required' });
+    }
+
+    const code = port_code.trim().toUpperCase();
+
+    // Check duplicate code
+    const existing = db.prepare('SELECT id FROM customs_ports WHERE tenant_id = ? AND port_code = ?').get(tenantId, code);
+    if (existing) {
+      return res.status(400).json({ error: `Port with code ${code} is already registered` });
+    }
+
+    // If marked default, unset others
+    if (Number(is_default) === 1) {
+      db.prepare('UPDATE customs_ports SET is_default = 0 WHERE tenant_id = ?').run(tenantId);
+    }
+
+    const insert = db.prepare(`
+      INSERT INTO customs_ports (
+        tenant_id, port_code, port_name, port_type, customs_zone,
+        custodian, icegate_enabled, cfs_names, edi_version,
+        contact_phone, contact_email, is_default, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const result = insert.run(
+      tenantId,
+      code,
+      port_name.trim(),
+      port_type.toUpperCase(),
+      customs_zone || null,
+      custodian || null,
+      Number(icegate_enabled) ? 1 : 0,
+      cfs_names || null,
+      edi_version || 'ICEGATE 2.0',
+      contact_phone || null,
+      contact_email || null,
+      Number(is_default) ? 1 : 0,
+      status || 'active'
+    );
+
+    res.status(201).json({
+      success: true,
+      id: result.lastInsertRowid,
+      message: `Customs Port ${code} - ${port_name} registered successfully`
+    });
+  } catch (err) {
+    console.error('Error creating customs port:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 10.3 Update Customs Port
+router.put('/ports/:id', (req, res) => {
+  try {
+    const tenantId = req.tenantId;
+    if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
+
+    const port = db.prepare('SELECT * FROM customs_ports WHERE id = ? AND tenant_id = ?').get(req.params.id, tenantId);
+    if (!port) return res.status(404).json({ error: 'Port record not found' });
+
+    const {
+      port_name,
+      port_type,
+      customs_zone,
+      custodian,
+      icegate_enabled,
+      cfs_names,
+      edi_version,
+      contact_phone,
+      contact_email,
+      is_default,
+      status
+    } = req.body;
+
+    if (Number(is_default) === 1) {
+      db.prepare('UPDATE customs_ports SET is_default = 0 WHERE tenant_id = ?').run(tenantId);
+    }
+
+    db.prepare(`
+      UPDATE customs_ports SET
+        port_name = COALESCE(?, port_name),
+        port_type = COALESCE(?, port_type),
+        customs_zone = COALESCE(?, customs_zone),
+        custodian = COALESCE(?, custodian),
+        icegate_enabled = COALESCE(?, icegate_enabled),
+        cfs_names = COALESCE(?, cfs_names),
+        edi_version = COALESCE(?, edi_version),
+        contact_phone = COALESCE(?, contact_phone),
+        contact_email = COALESCE(?, contact_email),
+        is_default = COALESCE(?, is_default),
+        status = COALESCE(?, status)
+      WHERE id = ? AND tenant_id = ?
+    `).run(
+      port_name ? port_name.trim() : null,
+      port_type ? port_type.toUpperCase() : null,
+      customs_zone ?? null,
+      custodian ?? null,
+      icegate_enabled !== undefined ? Number(icegate_enabled) : null,
+      cfs_names ?? null,
+      edi_version ?? null,
+      contact_phone ?? null,
+      contact_email ?? null,
+      is_default !== undefined ? Number(is_default) : null,
+      status ?? null,
+      req.params.id,
+      tenantId
+    );
+
+    res.json({ success: true, message: 'Customs port updated successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 10.4 Set Port as Default
+router.put('/ports/:id/default', (req, res) => {
+  try {
+    const tenantId = req.tenantId;
+    if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
+
+    db.prepare('UPDATE customs_ports SET is_default = 0 WHERE tenant_id = ?').run(tenantId);
+    const result = db.prepare('UPDATE customs_ports SET is_default = 1 WHERE id = ? AND tenant_id = ?').run(req.params.id, tenantId);
+
+    if (result.changes === 0) return res.status(404).json({ error: 'Port record not found' });
+
+    res.json({ success: true, message: 'Primary Gateway Port updated successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 10.5 Delete Customs Port
+router.delete('/ports/:id', (req, res) => {
+  try {
+    const tenantId = req.tenantId;
+    if (!tenantId) return res.status(400).json({ error: 'Tenant context required' });
+
+    const result = db.prepare('DELETE FROM customs_ports WHERE id = ? AND tenant_id = ?').run(req.params.id, tenantId);
+    if (result.changes === 0) return res.status(404).json({ error: 'Port record not found' });
+
+    res.json({ success: true, message: 'Customs Port removed successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

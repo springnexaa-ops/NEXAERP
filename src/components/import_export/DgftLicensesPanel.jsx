@@ -23,7 +23,9 @@ import {
   Layers,
   Percent,
   Check,
-  AlertCircle
+  AlertCircle,
+  Trash2,
+  Filter
 } from 'lucide-react';
 
 export function DgftLicensesPanel() {
@@ -36,6 +38,7 @@ export function DgftLicensesPanel() {
 
   // Tab: 'licenses', 'ebrc'
   const [activeTab, setActiveTab] = useState('licenses');
+  const [filterCategory, setFilterCategory] = useState('all');
 
   // Modals
   const [isLicenseModalOpen, setIsLicenseModalOpen] = useState(false);
@@ -44,9 +47,9 @@ export function DgftLicensesPanel() {
 
   // License Form State
   const [licenseForm, setLicenseForm] = useState({
-    license_type: 'ADVANCE_AUTHORISATION',
+    license_type: 'RCMC',
     license_number: '',
-    issuing_authority: 'DGFT',
+    issuing_authority: 'EPC',
     issue_date: new Date().toISOString().slice(0, 10),
     expiry_date: '',
     cif_value: '',
@@ -54,7 +57,7 @@ export function DgftLicensesPanel() {
     obligation_fulfilled_value: '0',
     status: 'active',
     scrip_balance: '0',
-    epc_name: 'Pharmexcil',
+    epc_name: 'APEDA (Agricultural & Processed Food Products Export Development Authority)',
     dgft_file_number: '',
     eodc_status: 'pending',
     notes: ''
@@ -173,22 +176,41 @@ export function DgftLicensesPanel() {
     }
   };
 
+  const handleDeleteLicense = async (licId, licNumber) => {
+    if (!window.confirm(`Are you sure you want to remove statutory registration #${licNumber}?`)) return;
+    try {
+      await api.deleteDgftLicense(licId);
+      showToast(`Registration #${licNumber} removed successfully`, 'success');
+      loadData();
+    } catch (err) {
+      showToast(err.message || 'Failed to delete license', 'error');
+    }
+  };
+
   const getSchemeBadge = (type) => {
     switch (type) {
       case 'IEC':
         return { label: 'IEC Code', color: 'bg-sky-500/20 text-sky-300 border-sky-500/30' };
+      case 'RCMC':
+        return { label: 'RCMC Council', color: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30' };
+      case 'FSSAI_CENTRAL':
+        return { label: 'FSSAI Central Export', color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' };
+      case 'FSSAI_STATE':
+        return { label: 'FSSAI State Unit', color: 'bg-teal-500/20 text-teal-300 border-teal-500/30' };
       case 'ADVANCE_AUTHORISATION':
-        return { label: 'Advance Auth (AA)', color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' };
+        return { label: 'Advance Auth (AA)', color: 'bg-blue-500/20 text-blue-300 border-blue-500/30' };
       case 'EPCG':
         return { label: 'EPCG Scheme', color: 'bg-purple-500/20 text-purple-300 border-purple-500/30' };
       case 'RODTEP':
         return { label: 'RoDTEP Scrips', color: 'bg-amber-500/20 text-amber-300 border-amber-500/30' };
-      case 'RCMC':
-        return { label: 'RCMC Membership', color: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30' };
       case 'LUT_GST':
-        return { label: 'GST LUT Bond', color: 'bg-teal-500/20 text-teal-300 border-teal-500/30' };
+        return { label: 'GST LUT Bond', color: 'bg-green-500/20 text-green-300 border-green-500/30' };
       case 'AEO':
         return { label: 'AEO Tier-1', color: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' };
+      case 'CDSCO':
+        return { label: 'CDSCO Export NOC', color: 'bg-rose-500/20 text-rose-300 border-rose-500/30' };
+      case 'BIS':
+        return { label: 'BIS Quality Cert', color: 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/30' };
       default:
         return { label: type, color: 'bg-slate-700 text-slate-300 border-slate-600' };
     }
@@ -299,118 +321,154 @@ export function DgftLicensesPanel() {
       )}
 
       {/* 3. Scheme Statistics Overview */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 shadow-md">
-          <div className="flex items-center justify-between text-slate-400 text-xs">
-            <span>Advance Auth (AA)</span>
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
-          </div>
-          <div className="text-xl font-black text-white mt-1 font-mono">
-            {formatCurrency(stats?.aa_fulfilled_total || 0)}
-          </div>
-          <div className="text-[10px] text-slate-400 mt-0.5">
-            Obligation: {formatCurrency(stats?.aa_obligation_total || 0)}
-          </div>
-          {stats?.aa_obligation_total > 0 && (
-            <div className="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
-              <div
-                className="bg-emerald-500 h-full rounded-full"
-                style={{ width: `${Math.min(100, Math.round(((stats.aa_fulfilled_total || 0) / stats.aa_obligation_total) * 100))}%` }}
-              />
+      {(() => {
+        const rcmcCount = licenses.filter(l => l.license_type === 'RCMC').length;
+        const fssaiCount = licenses.filter(l => l.license_type && l.license_type.startsWith('FSSAI')).length;
+        const schemesCount = licenses.filter(l => ['ADVANCE_AUTHORISATION', 'EPCG', 'RODTEP'].includes(l.license_type)).length;
+        const regulatoryCount = licenses.filter(l => ['LUT_GST', 'AEO', 'CDSCO', 'BIS', 'IEC'].includes(l.license_type)).length;
+
+        return (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 shadow-md">
+                <div className="flex items-center justify-between text-slate-400 text-xs">
+                  <span>Multiple RCMCs</span>
+                  <Award className="w-4 h-4 text-indigo-400" />
+                </div>
+                <div className="text-xl font-black text-indigo-300 mt-1 font-mono">
+                  {rcmcCount} Active
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5 line-clamp-1">APEDA, Pharmexcil, EEPC</div>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 shadow-md">
+                <div className="flex items-center justify-between text-slate-400 text-xs">
+                  <span>Multiple FSSAIs</span>
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                </div>
+                <div className="text-xl font-black text-emerald-300 mt-1 font-mono">
+                  {fssaiCount} Licenses
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5">Central Export & State</div>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 shadow-md">
+                <div className="flex items-center justify-between text-slate-400 text-xs">
+                  <span>Advance Auth</span>
+                  <ShieldCheck className="w-4 h-4 text-blue-400" />
+                </div>
+                <div className="text-xl font-black text-white mt-1 font-mono truncate">
+                  {formatCurrency(stats?.aa_fulfilled_total || 0)}
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5 truncate">
+                  Obl: {formatCurrency(stats?.aa_obligation_total || 0)}
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 shadow-md">
+                <div className="flex items-center justify-between text-slate-400 text-xs">
+                  <span>EPCG Machinery</span>
+                  <Award className="w-4 h-4 text-purple-400" />
+                </div>
+                <div className="text-xl font-black text-white mt-1 font-mono truncate">
+                  {formatCurrency(stats?.epcg_fulfilled_total || 0)}
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5 truncate">
+                  Obl: {formatCurrency(stats?.epcg_obligation_total || 0)}
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 shadow-md">
+                <div className="flex items-center justify-between text-slate-400 text-xs">
+                  <span>RoDTEP Scrips</span>
+                  <Coins className="w-4 h-4 text-amber-400" />
+                </div>
+                <div className="text-xl font-black text-amber-300 mt-1 font-mono truncate">
+                  {formatCurrency(stats?.rodtep_balance_total || 0)}
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5">Usable for BCD duty</div>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 shadow-md">
+                <div className="flex items-center justify-between text-slate-400 text-xs">
+                  <span>e-BRC Desk</span>
+                  <Landmark className="w-4 h-4 text-sky-400" />
+                </div>
+                <div className="text-xl font-black text-sky-300 mt-1 font-mono">
+                  {realizations.length} Realized
+                </div>
+                <div className="text-[10px] text-emerald-400 mt-0.5">
+                  {realizations.filter(r => r.edpms_status === 'closed').length} EDPMS Closed
+                </div>
+              </div>
             </div>
-          )}
-        </div>
 
-        <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 shadow-md">
-          <div className="flex items-center justify-between text-slate-400 text-xs">
-            <span>EPCG Machinery</span>
-            <Award className="w-4 h-4 text-purple-400" />
-          </div>
-          <div className="text-xl font-black text-white mt-1 font-mono">
-            {formatCurrency(stats?.epcg_fulfilled_total || 0)}
-          </div>
-          <div className="text-[10px] text-slate-400 mt-0.5">
-            Obligation: {formatCurrency(stats?.epcg_obligation_total || 0)}
-          </div>
-          {stats?.epcg_obligation_total > 0 && (
-            <div className="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
-              <div
-                className="bg-purple-500 h-full rounded-full"
-                style={{ width: `${Math.min(100, Math.round(((stats.epcg_fulfilled_total || 0) / stats.epcg_obligation_total) * 100))}%` }}
-              />
+            {/* Sub-Navigation Tabs */}
+            <div className="flex items-center space-x-2 border-b border-slate-800 pb-2">
+              <button
+                onClick={() => setActiveTab('licenses')}
+                className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+                  activeTab === 'licenses'
+                    ? 'bg-emerald-600 text-white shadow-md'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                }`}
+              >
+                <Award className="w-4 h-4" />
+                <span>Statutory Licenses & Schemes ({licenses.length})</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('ebrc')}
+                className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+                  activeTab === 'ebrc'
+                    ? 'bg-sky-600 text-white shadow-md'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                }`}
+              >
+                <Landmark className="w-4 h-4" />
+                <span>e-BRC Bank Realisations & EDPMS ({realizations.length})</span>
+              </button>
             </div>
-          )}
-        </div>
-
-        <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 shadow-md">
-          <div className="flex items-center justify-between text-slate-400 text-xs">
-            <span>RoDTEP Duty Scrips</span>
-            <Coins className="w-4 h-4 text-amber-400" />
           </div>
-          <div className="text-xl font-black text-amber-300 mt-1 font-mono">
-            {formatCurrency(stats?.rodtep_balance_total || 0)}
-          </div>
-          <div className="text-[10px] text-slate-400 mt-0.5">Usable for BCD duty payment</div>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 shadow-md">
-          <div className="flex items-center justify-between text-slate-400 text-xs">
-            <span>e-BRC Realizations</span>
-            <Landmark className="w-4 h-4 text-sky-400" />
-          </div>
-          <div className="text-xl font-black text-sky-300 mt-1 font-mono">
-            {realizations.length} Realized
-          </div>
-          <div className="text-[10px] text-emerald-400 mt-0.5">
-            {realizations.filter(r => r.edpms_status === 'closed').length} EDPMS Closed
-          </div>
-        </div>
-      </div>
-
-      {/* 4. Sub-Navigation Tabs */}
-      <div className="flex items-center space-x-2 border-b border-slate-800 pb-2">
-        <button
-          onClick={() => setActiveTab('licenses')}
-          className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl text-xs font-bold transition ${
-            activeTab === 'licenses'
-              ? 'bg-emerald-600 text-white shadow-md'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-          }`}
-        >
-          <Award className="w-4 h-4" />
-          <span>Active Licenses & Schemes ({licenses.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('ebrc')}
-          className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl text-xs font-bold transition ${
-            activeTab === 'ebrc'
-              ? 'bg-sky-600 text-white shadow-md'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-          }`}
-        >
-          <Landmark className="w-4 h-4" />
-          <span>e-BRC Bank Realisations & EDPMS ({realizations.length})</span>
-        </button>
-      </div>
+        );
+      })()}
 
       {/* 5. TAB 1: DGFT LICENSES TABLE */}
       {activeTab === 'licenses' && (
         <div className="bg-slate-950/70 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-          <div className="p-3.5 bg-slate-900/60 border-b border-slate-800/80 flex items-center justify-between">
-            <span className="font-bold text-xs text-white uppercase tracking-wider flex items-center gap-1.5">
-              <FileCheck2 className="w-3.5 h-3.5 text-emerald-400" />
-              Registered DGFT Foreign Trade Schemes & Regulatory Certificates
-            </span>
-            <span className="text-[10px] text-slate-400 font-mono">FTP 2023 COMPLIANT</span>
+          {/* Top Filter Bar */}
+          <div className="p-3 bg-slate-900/60 border-b border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+              {[
+                { id: 'all', label: `All Registrations (${licenses.length})` },
+                { id: 'rcmc', label: `Multiple RCMCs (${licenses.filter(l => l.license_type === 'RCMC').length})` },
+                { id: 'fssai', label: `Multiple FSSAIs (${licenses.filter(l => l.license_type && l.license_type.startsWith('FSSAI')).length})` },
+                { id: 'schemes', label: `DGFT Schemes (${licenses.filter(l => ['ADVANCE_AUTHORISATION', 'EPCG', 'RODTEP'].includes(l.license_type)).length})` },
+                { id: 'regulatory', label: `Bonds & Quality (${licenses.filter(l => ['LUT_GST', 'AEO', 'CDSCO', 'BIS', 'IEC'].includes(l.license_type)).length})` }
+              ].map(f => (
+                <button
+                  key={f.id}
+                  onClick={() => setFilterCategory(f.id)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
+                    filterCategory === f.id
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+
+            <span className="text-[10px] text-slate-400 font-mono whitespace-nowrap">FTP 2023 & FSSAI COMPLIANT</span>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-900/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800 font-bold">
                 <tr>
-                  <th className="p-3">Scheme & Number</th>
-                  <th className="p-3">Issuing Authority</th>
+                  <th className="p-3">Registration & Number</th>
+                  <th className="p-3">Issuing Authority / Council</th>
                   <th className="p-3">Validity Window</th>
                   <th className="p-3">CIF / Duty Value</th>
                   <th className="p-3">Export Obligation</th>
@@ -419,91 +477,109 @@ export function DgftLicensesPanel() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 font-medium">
-                {licenses.map(lic => {
-                  const badge = getSchemeBadge(lic.license_type);
+                {licenses
+                  .filter(lic => {
+                    if (filterCategory === 'all') return true;
+                    if (filterCategory === 'rcmc') return lic.license_type === 'RCMC';
+                    if (filterCategory === 'fssai') return lic.license_type && lic.license_type.startsWith('FSSAI');
+                    if (filterCategory === 'schemes') return ['ADVANCE_AUTHORISATION', 'EPCG', 'RODTEP'].includes(lic.license_type);
+                    if (filterCategory === 'regulatory') return ['LUT_GST', 'AEO', 'CDSCO', 'BIS', 'IEC'].includes(lic.license_type);
+                    return true;
+                  })
+                  .map(lic => {
+                    const badge = getSchemeBadge(lic.license_type);
 
-                  return (
-                    <tr key={lic.id} className="hover:bg-slate-900/50 transition">
-                      <td className="p-3">
-                        <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase border ${badge.color}`}>
-                          {badge.label}
-                        </span>
-                        <div className="font-bold text-white text-xs mt-1 font-mono">
-                          {lic.license_number}
-                        </div>
-                        {lic.epc_name && (
-                          <div className="text-[10px] text-slate-400 leading-snug">{lic.epc_name}</div>
-                        )}
-                      </td>
-
-                      <td className="p-3">
-                        <div className="font-semibold text-slate-200">{lic.issuing_authority}</div>
-                        {lic.dgft_file_number && (
-                          <div className="text-[10px] text-slate-500 font-mono">{lic.dgft_file_number}</div>
-                        )}
-                      </td>
-
-                      <td className="p-3">
-                        <div className="text-slate-300">Issued: {lic.issue_date}</div>
-                        <div className="text-slate-400 text-[11px]">Expires: {lic.expiry_date || 'Permanent'}</div>
-                      </td>
-
-                      <td className="p-3 font-mono">
-                        {lic.license_type === 'RODTEP' ? (
-                          <div>
-                            <div className="text-amber-400 font-bold">{formatCurrency(lic.scrip_balance)}</div>
-                            <span className="text-[9px] text-slate-500">Scrip Balance</span>
+                    return (
+                      <tr key={lic.id} className="hover:bg-slate-900/50 transition">
+                        <td className="p-3">
+                          <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase border ${badge.color}`}>
+                            {badge.label}
+                          </span>
+                          <div className="font-bold text-white text-xs mt-1 font-mono">
+                            {lic.license_number}
                           </div>
-                        ) : (
-                          <div>
-                            <div className="text-slate-200">{formatCurrency(lic.cif_value)}</div>
-                            <span className="text-[9px] text-slate-500">Duty-free CIF</span>
-                          </div>
-                        )}
-                      </td>
+                          {lic.epc_name && (
+                            <div className="text-[10px] text-slate-400 leading-snug">{lic.epc_name}</div>
+                          )}
+                        </td>
 
-                      <td className="p-3 font-mono">
-                        {lic.fob_obligation_value > 0 ? (
-                          <div>
-                            <div className="font-bold text-emerald-400">
-                              {formatCurrency(lic.obligation_fulfilled_value)} / {formatCurrency(lic.fob_obligation_value)}
+                        <td className="p-3">
+                          <div className="font-semibold text-slate-200">{lic.issuing_authority}</div>
+                          {lic.dgft_file_number && (
+                            <div className="text-[10px] text-slate-500 font-mono">{lic.dgft_file_number}</div>
+                          )}
+                        </td>
+
+                        <td className="p-3">
+                          <div className="text-slate-300">Issued: {lic.issue_date}</div>
+                          <div className="text-slate-400 text-[11px]">Expires: {lic.expiry_date || 'Permanent'}</div>
+                        </td>
+
+                        <td className="p-3 font-mono">
+                          {lic.license_type === 'RODTEP' ? (
+                            <div>
+                              <div className="text-amber-400 font-bold">{formatCurrency(lic.scrip_balance)}</div>
+                              <span className="text-[9px] text-slate-500">Scrip Balance</span>
                             </div>
-                            <div className="w-28 bg-slate-800 h-1 rounded-full mt-1 overflow-hidden">
-                              <div
-                                className="bg-emerald-500 h-full rounded-full"
-                                style={{
-                                  width: `${Math.min(100, Math.round(((lic.obligation_fulfilled_value || 0) / lic.fob_obligation_value) * 100))}%`
-                                }}
-                              />
+                          ) : (
+                            <div>
+                              <div className="text-slate-200">{formatCurrency(lic.cif_value)}</div>
+                              <span className="text-[9px] text-slate-500">Duty-free CIF</span>
                             </div>
-                          </div>
-                        ) : (
-                          <span className="text-slate-500">N/A</span>
-                        )}
-                      </td>
+                          )}
+                        </td>
 
-                      <td className="p-3">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          lic.status === 'active' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-slate-700 text-slate-400'
-                        }`}>
-                          {lic.status.toUpperCase()}
-                        </span>
-                        {lic.eodc_status && lic.fob_obligation_value > 0 && (
-                          <div className="text-[10px] text-slate-400 mt-1">
-                            EODC: <strong className="text-slate-200">{lic.eodc_status}</strong>
-                          </div>
-                        )}
-                      </td>
+                        <td className="p-3 font-mono">
+                          {lic.fob_obligation_value > 0 ? (
+                            <div>
+                              <div className="font-bold text-emerald-400">
+                                {formatCurrency(lic.obligation_fulfilled_value)} / {formatCurrency(lic.fob_obligation_value)}
+                              </div>
+                              <div className="w-28 bg-slate-800 h-1 rounded-full mt-1 overflow-hidden">
+                                <div
+                                  className="bg-emerald-500 h-full rounded-full"
+                                  style={{
+                                    width: `${Math.min(100, Math.round(((lic.obligation_fulfilled_value || 0) / lic.fob_obligation_value) * 100))}%`
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-slate-500">N/A</span>
+                          )}
+                        </td>
 
-                      <td className="p-3 text-right">
-                        <button
-                          onClick={() => setEditingLicense({ ...lic })}
-                          className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-emerald-500/40 text-emerald-300 font-bold text-xs transition"
-                        >
-                          Update
-                        </button>
-                      </td>
-                    </tr>
+                        <td className="p-3">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            lic.status === 'active' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-slate-700 text-slate-400'
+                          }`}>
+                            {lic.status.toUpperCase()}
+                          </span>
+                          {lic.eodc_status && lic.fob_obligation_value > 0 && (
+                            <div className="text-[10px] text-slate-400 mt-1">
+                              EODC: <strong className="text-slate-200">{lic.eodc_status}</strong>
+                            </div>
+                          )}
+                        </td>
+
+                        <td className="p-3 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => setEditingLicense({ ...lic })}
+                              className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-emerald-500/40 text-emerald-300 font-bold text-xs transition"
+                            >
+                              Update
+                            </button>
+                            <button
+                              onClick={() => handleDeleteLicense(lic.id, lic.license_number)}
+                              title="Remove statutory registration"
+                              className="p-1 rounded-lg bg-slate-900 hover:bg-rose-500/10 border border-slate-800 hover:border-rose-500/40 text-slate-400 hover:text-rose-300 transition"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
                   );
                 })}
               </tbody>
@@ -604,33 +680,112 @@ export function DgftLicensesPanel() {
             <form onSubmit={handleCreateLicense} className="p-5 space-y-3.5 text-xs">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-slate-300 block mb-1 font-semibold">Scheme / License Type *</label>
+                  <label className="text-slate-300 block mb-1 font-semibold">Registration / License Type *</label>
                   <select
                     value={licenseForm.license_type}
-                    onChange={e => setLicenseForm({ ...licenseForm, license_type: e.target.value })}
+                    onChange={e => {
+                      const t = e.target.value;
+                      let defaultAuth = 'DGFT';
+                      let defaultEpc = licenseForm.epc_name;
+                      if (t === 'RCMC') {
+                        defaultAuth = 'EPC';
+                        defaultEpc = 'APEDA (Agricultural & Processed Food Products Export Development Authority)';
+                      } else if (t === 'FSSAI_CENTRAL') {
+                        defaultAuth = 'FSSAI_CENTRAL';
+                        defaultEpc = 'Central Licensing Authority - FSSAI (100% EOU & Merchant Exporter)';
+                      } else if (t === 'FSSAI_STATE') {
+                        defaultAuth = 'FDA_STATE';
+                        defaultEpc = 'Food & Drugs Administration (State Manufacturing Unit)';
+                      } else if (t === 'LUT_GST') {
+                        defaultAuth = 'GSTN';
+                      } else if (t === 'AEO') {
+                        defaultAuth = 'CBIC_CUSTOMS';
+                      } else if (t === 'CDSCO') {
+                        defaultAuth = 'CDSCO_CENTRAL';
+                      } else if (t === 'BIS') {
+                        defaultAuth = 'BIS';
+                      }
+                      setLicenseForm({
+                        ...licenseForm,
+                        license_type: t,
+                        issuing_authority: defaultAuth,
+                        epc_name: defaultEpc
+                      });
+                    }}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold"
                   >
-                    <option value="ADVANCE_AUTHORISATION">Advance Authorisation (AA)</option>
+                    <option value="RCMC">RCMC (Export Promotion Council Membership)</option>
+                    <option value="FSSAI_CENTRAL">Central FSSAI License (100% EOU / Merchant Exporter)</option>
+                    <option value="FSSAI_STATE">State FSSAI License (Manufacturing / Packing Unit)</option>
+                    <option value="ADVANCE_AUTHORISATION">Advance Authorisation (AA Duty-Free Inputs)</option>
                     <option value="EPCG">EPCG Capital Goods Scheme</option>
                     <option value="RODTEP">RoDTEP Duty Credit Scrips</option>
-                    <option value="RCMC">RCMC (Export Promotion Council)</option>
-                    <option value="LUT_GST">GST LUT Export Bond</option>
+                    <option value="LUT_GST">GST LUT Export Bond (Rule 96A)</option>
                     <option value="AEO">AEO Tier-1/2 Accreditation</option>
+                    <option value="CDSCO">CDSCO Dual-Use & Export Clearance NOC</option>
+                    <option value="BIS">Bureau of Indian Standards (BIS) Certificate</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="text-slate-300 block mb-1 font-semibold">License / Registration Number *</label>
+                  <label className="text-slate-300 block mb-1 font-semibold">
+                    {licenseForm.license_type.startsWith('FSSAI')
+                      ? '14-Digit FSSAI License Number *'
+                      : 'License / Registration Number *'}
+                  </label>
                   <input
                     type="text"
                     required
-                    placeholder="e.g. AA-05102026-0941"
+                    maxLength={licenseForm.license_type.startsWith('FSSAI') ? 14 : 40}
+                    placeholder={licenseForm.license_type.startsWith('FSSAI') ? 'e.g. 10022026001928 (14 digits)' : 'e.g. APEDA/RCMC/2026/8812'}
                     value={licenseForm.license_number}
                     onChange={e => setLicenseForm({ ...licenseForm, license_number: e.target.value })}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
                   />
                 </div>
               </div>
+
+              {/* RCMC Specific Council Selector */}
+              {licenseForm.license_type === 'RCMC' && (
+                <div>
+                  <label className="text-slate-300 block mb-1 font-semibold">Select Export Promotion Council (RCMC) *</label>
+                  <select
+                    value={licenseForm.epc_name}
+                    onChange={e => setLicenseForm({ ...licenseForm, epc_name: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold"
+                  >
+                    <option value="APEDA (Agricultural & Processed Food Products Export Development Authority)">APEDA - Agri, Rice & Processed Foods</option>
+                    <option value="Pharmexcil (Pharmaceuticals Export Promotion Council of India)">Pharmexcil - Bulk Drugs & Pharmaceuticals</option>
+                    <option value="EEPC India (Engineering Export Promotion Council)">EEPC India - Engineering Machinery & Equipment</option>
+                    <option value="Spices Board India (Ministry of Commerce & Industry)">Spices Board - Cardamom, Pepper & Spices</option>
+                    <option value="FIEO (Federation of Indian Export Organisations)">FIEO - Apex Exporters Body (Multi-Product)</option>
+                    <option value="MPEDA (Marine Products Export Development Authority)">MPEDA - Marine & Seafood Exports</option>
+                    <option value="Tea Board of India">Tea Board of India</option>
+                    <option value="Coffee Board of India">Coffee Board of India</option>
+                    <option value="Chemexcil (Basic Chemicals, Cosmetics & Dyes)">Chemexcil - Basic Chemicals & Formulations</option>
+                  </select>
+                </div>
+              )}
+
+              {/* FSSAI Authority Details */}
+              {(licenseForm.license_type === 'FSSAI_CENTRAL' || licenseForm.license_type === 'FSSAI_STATE') && (
+                <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-semibold text-slate-300">FSSAI Authority Division / Unit Location</span>
+                    <span className="text-emerald-400 font-mono">14-DIGIT VERIFIED</span>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="e.g. Central Licensing Authority WR (JNPT SEZ) or State FDA MIDC Taloja"
+                    value={licenseForm.epc_name}
+                    onChange={e => setLicenseForm({ ...licenseForm, epc_name: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white"
+                  />
+                  <p className="text-[10px] text-slate-400">
+                    * This FSSAI license will immediately link to the <strong>FSSAI Label Generator</strong> for 1-click statutory export sticker printing.
+                  </p>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -643,7 +798,7 @@ export function DgftLicensesPanel() {
                   />
                 </div>
                 <div>
-                  <label className="text-slate-300 block mb-1 font-semibold">Expiry / EOP Date</label>
+                  <label className="text-slate-300 block mb-1 font-semibold">Expiry / Validity Date</label>
                   <input
                     type="date"
                     value={licenseForm.expiry_date}
@@ -692,21 +847,21 @@ export function DgftLicensesPanel() {
               )}
 
               <div>
-                <label className="text-slate-300 block mb-1 font-semibold">Export Council / Agency Name</label>
+                <label className="text-slate-300 block mb-1 font-semibold">Issuing Authority / Portal Reference</label>
                 <input
                   type="text"
-                  placeholder="e.g. Pharmexcil, FIEO, EEPC, APEDA"
-                  value={licenseForm.epc_name}
-                  onChange={e => setLicenseForm({ ...licenseForm, epc_name: e.target.value })}
+                  placeholder="e.g. DGFT, CBIC Customs, FSSAI Central, GSTN, EPC"
+                  value={licenseForm.issuing_authority}
+                  onChange={e => setLicenseForm({ ...licenseForm, issuing_authority: e.target.value })}
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white"
                 />
               </div>
 
               <div>
-                <label className="text-slate-300 block mb-1 font-semibold">DGFT File Reference & Notes</label>
+                <label className="text-slate-300 block mb-1 font-semibold">Commodity Scope, File Reference & Notes</label>
                 <textarea
                   rows="2"
-                  placeholder="DGFT File No, condition notes, import product description"
+                  placeholder="Commodity coverage, ARN number, authorized premises address"
                   value={licenseForm.notes}
                   onChange={e => setLicenseForm({ ...licenseForm, notes: e.target.value })}
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white"
@@ -725,7 +880,7 @@ export function DgftLicensesPanel() {
                   type="submit"
                   className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
                 >
-                  Register Scheme
+                  Register License / Certificate
                 </button>
               </div>
             </form>

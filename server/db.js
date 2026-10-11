@@ -762,6 +762,28 @@ function initDatabase() {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
     );
+
+    -- ========================================================
+    -- CUSTOMS PORTS & INLAND CONTAINER DEPOTS (ICDs)
+    -- ========================================================
+    CREATE TABLE IF NOT EXISTS customs_ports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      port_code TEXT NOT NULL,               -- e.g. 'INNSA1', 'INMUN1', 'INDEL4', 'INTKD6'
+      port_name TEXT NOT NULL,               -- e.g. 'Nhava Sheva (JNPT) Sea Port'
+      port_type TEXT NOT NULL,               -- 'SEA', 'AIR', 'ICD', 'LCS', 'SEZ'
+      customs_zone TEXT,                     -- e.g. 'Mumbai Customs Zone II', 'Delhi Customs Zone'
+      custodian TEXT,                        -- e.g. 'JNPT / DP World / PSA', 'CONCOR'
+      icegate_enabled INTEGER DEFAULT 1,     -- 1 or 0
+      cfs_names TEXT,                        -- Major Container Freight Stations
+      edi_version TEXT DEFAULT 'ICEGATE 2.0',
+      contact_phone TEXT,
+      contact_email TEXT,
+      is_default INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'active',          -- 'active', 'inactive'
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+    );
   `);
 
   ensureTenantColumns();
@@ -1563,6 +1585,233 @@ function seedTenantImportExportData(tenantId) {
         'Indian Customs CBIC', 'CBIC/DIC/AEO-T1/9021', 'discharged',
         'Authorized Economic Operator Tier-1 accreditation. Grants Direct Port Delivery (DPD) & faster green channel clearance.'
       );
+    }
+
+    // Ensure Multi-RCMCs and Multi-FSSAI licenses exist for EXIM Tenant
+    const checkExtraLic = db.prepare('SELECT COUNT(*) as count FROM exim_licenses WHERE tenant_id = ? AND license_number = ?');
+    const insExtraLic = db.prepare(`
+      INSERT INTO exim_licenses (
+        tenant_id, license_type, license_number, issuing_authority, issue_date, expiry_date,
+        cif_value, fob_obligation_value, obligation_fulfilled_value, status, scrip_balance,
+        epc_name, dgft_file_number, eodc_status, notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const extraLicenses = [
+      {
+        type: 'RCMC',
+        num: 'APEDA/RCMC/2024/60192',
+        auth: 'EPC',
+        issue: '2024-05-10',
+        exp: '2029-05-09',
+        epc: 'APEDA (Agricultural & Processed Food Products Export Development Authority)',
+        file: 'APEDA/NDLS/EXP/60192',
+        notes: 'Export registration for Basmati & Non-Basmati Rice, Organic Pulses, Guar Gum, Herbal Teas, Processed Fruits & Purees.'
+      },
+      {
+        type: 'RCMC',
+        num: 'EEPC/WR/RCMC/2023/11842',
+        auth: 'EPC',
+        issue: '2023-09-01',
+        exp: '2028-08-31',
+        epc: 'EEPC India (Engineering Export Promotion Council)',
+        file: 'EEPC/MUM/RCMC/11842',
+        notes: 'Engineering goods export certification: SS 316L Reactor vessels, packaging machinery components, industrial filtration cartridges.'
+      },
+      {
+        type: 'RCMC',
+        num: 'SPICES-BRD/RCMC/2025/4412',
+        auth: 'EPC',
+        issue: '2025-01-15',
+        exp: '2030-01-14',
+        epc: 'Spices Board India (Ministry of Commerce & Industry)',
+        file: 'SB/COK/REG/4412',
+        notes: 'Certified for Whole & Ground Spices, Turmeric Oleoresin, Cardamom Essential Oil, Ginger & Black Pepper Extracts.'
+      },
+      {
+        type: 'FSSAI_CENTRAL',
+        num: '10022026001928',
+        auth: 'FSSAI_CENTRAL',
+        issue: '2023-09-01',
+        exp: '2028-08-31',
+        epc: 'Central Licensing Authority - FSSAI Western Region (Mumbai Port & JNPT SEZ)',
+        file: 'FSSAI/CLA/WR/10022026001928',
+        notes: 'Category: 100% Export Oriented Unit (EOU) & Merchant Exporter. Authorization for Export of Nutraceuticals, Fortified Food Powders & Dietary Supplements via JNPT & Air Cargo.'
+      },
+      {
+        type: 'FSSAI_STATE',
+        num: '11521019000342',
+        auth: 'FDA_MAHARASHTRA',
+        issue: '2023-11-20',
+        exp: '2028-11-19',
+        epc: 'Food & Drugs Administration (FDA Maharashtra) - Raigad Division',
+        file: 'FDA/MAH/MFG/11521019000342',
+        notes: 'Category: Food Formulation & Nutraceutical Manufacturing Facility (MIDC Taloja). Clean Room Class 100,000 for botanical tablets & powders.'
+      },
+      {
+        type: 'FSSAI_STATE',
+        num: '10723031000881',
+        auth: 'FDA_GUJARAT',
+        issue: '2024-05-15',
+        exp: '2029-05-14',
+        epc: 'Food & Drugs Administration (FDA Gujarat) - Valsad Division',
+        file: 'FDA/GUJ/WH/10723031000881',
+        notes: 'Category: Cold Chain Storage, Secondary Packaging & Reefer Container Stuffing Facility (GIDC Vapi Hub).'
+      },
+      {
+        type: 'CDSCO',
+        num: 'CDSCO/WZ/EXP/2026/88102',
+        auth: 'CDSCO_CENTRAL',
+        issue: '2026-02-01',
+        exp: '2027-01-31',
+        epc: 'Central Drugs Standard Control Organisation (West Zone)',
+        file: 'CDSCO/WZ/DU/88102',
+        notes: 'Dual-use chemical NOC for high-purity pharma excipients & food grade stabilizers.'
+      },
+      {
+        type: 'BIS',
+        num: 'BIS/CM/L-8829104',
+        auth: 'BIS',
+        issue: '2024-06-10',
+        exp: '2027-06-09',
+        epc: 'Bureau of Indian Standards - Western Regional Office',
+        file: 'BIS/WRO/CMD/8829104',
+        notes: 'IS 15447 compliance for food-contact multi-layer barrier pouches and export cartons.'
+      }
+    ];
+
+    for (const lic of extraLicenses) {
+      if (checkExtraLic.get(tenantId, lic.num).count === 0) {
+        insExtraLic.run(
+          tenantId, lic.type, lic.num, lic.auth, lic.issue, lic.exp,
+          0, 0, 0, 'active', 0, lic.epc, lic.file, 'discharged', lic.notes
+        );
+      }
+    }
+
+    // Seed Gateway Customs Ports & ICDs
+    const portCount = db.prepare('SELECT COUNT(*) as count FROM customs_ports WHERE tenant_id = ?').get(tenantId).count;
+    if (portCount === 0) {
+      const insPort = db.prepare(`
+        INSERT INTO customs_ports (
+          tenant_id, port_code, port_name, port_type, customs_zone,
+          custodian, icegate_enabled, cfs_names, edi_version, contact_phone, contact_email, is_default, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
+      `);
+
+      const standardPorts = [
+        {
+          code: 'INNSA1',
+          name: 'Nhava Sheva (JNPT) Sea Port',
+          type: 'SEA',
+          zone: 'Mumbai Customs Zone II',
+          custodian: 'Jawaharlal Nehru Port Trust (JNPT) & DP World / PSA',
+          icegate: 1,
+          cfs: 'Gateway Distriparks, Allcargo CFS, Ameya CFS, Seabird Marine, Continental CFS',
+          edi: 'ICEGATE 2.0 (Single Window System)',
+          phone: '+91 22 2724 4000',
+          email: 'commissioner@jnpcustoms.gov.in',
+          def: 1
+        },
+        {
+          code: 'INMUN1',
+          name: 'Mundra Port & SEZ (Adani Terminal)',
+          type: 'SEA',
+          zone: 'Gujarat Customs Zone',
+          custodian: 'Adani Ports and Special Economic Zone (APSEZ)',
+          icegate: 1,
+          cfs: 'Adani CFS, Seabird CFS Mundra, MICT Container Freight Station',
+          edi: 'ICEGATE 2.0 (Single Window System)',
+          phone: '+91 2838 255000',
+          email: 'mundra.customs@icegate.gov.in',
+          def: 0
+        },
+        {
+          code: 'INDEL4',
+          name: 'Delhi Air Cargo Complex (IGI Airport)',
+          type: 'AIR',
+          zone: 'Delhi Customs Zone',
+          custodian: 'Celebi Delhi Cargo Terminal / DIAL',
+          icegate: 1,
+          cfs: 'Air Cargo Terminal 2 & 3, New Delhi Airport',
+          edi: 'ICEGATE 2.0 (Air EDI)',
+          phone: '+91 11 2565 2011',
+          email: 'aircargo.delhi@gov.in',
+          def: 0
+        },
+        {
+          code: 'INBOM4',
+          name: 'Mumbai Air Cargo Complex (Sahar Airport)',
+          type: 'AIR',
+          zone: 'Mumbai Customs Zone III (Air Cargo)',
+          custodian: 'Mumbai International Airport Ltd (MIAL)',
+          icegate: 1,
+          cfs: 'Air Cargo Complex Sahar, Andheri East, Mumbai',
+          edi: 'ICEGATE 2.0 (Air EDI)',
+          phone: '+91 22 2682 8100',
+          email: 'commissioner-accmum@gov.in',
+          def: 0
+        },
+        {
+          code: 'INTKD6',
+          name: 'ICD Tughlakabad Dry Port (TKD Rail Terminal)',
+          type: 'ICD',
+          zone: 'Delhi Customs Commissionerate (ICD Tughlakabad)',
+          custodian: 'Container Corporation of India (CONCOR)',
+          icegate: 1,
+          cfs: 'CONCOR TKD Dry Port Yard, Okhla Phase-II Rail Siding',
+          edi: 'ICEGATE 2.0 (ICD EDI)',
+          phone: '+91 11 2636 9100',
+          email: 'icdtkd.customs@gov.in',
+          def: 0
+        },
+        {
+          code: 'INMAA1',
+          name: 'Chennai Sea Port (Madras Port)',
+          type: 'SEA',
+          zone: 'Chennai Customs Zone',
+          custodian: 'Chennai Port Authority & DP World / PSA Chennai',
+          icegate: 1,
+          cfs: 'Chennai Port Trust CFS, Sattva CFS, Sanco Trans CFS',
+          edi: 'ICEGATE 2.0 (Single Window System)',
+          phone: '+91 44 2526 0000',
+          email: 'prcommr-chennaisea@gov.in',
+          def: 0
+        },
+        {
+          code: 'INCOK1',
+          name: 'Cochin Port & ICTT Vallarpadam',
+          type: 'SEA',
+          zone: 'Cochin Customs Commissionerate',
+          custodian: 'India Gateway Terminal (DP World Cochin)',
+          icegate: 1,
+          cfs: 'Cochin Port Trust CFS, Falcon CFS, MIV Logistics CFS',
+          edi: 'ICEGATE 2.0 (Single Window System)',
+          phone: '+91 484 266 6422',
+          email: 'commr-cochincust@gov.in',
+          def: 0
+        },
+        {
+          code: 'INHZR1',
+          name: 'Hazira Port & Industrial Terminal',
+          type: 'SEA',
+          zone: 'Surat Customs Commissionerate',
+          custodian: 'Adani Hazira Port Ltd',
+          icegate: 1,
+          cfs: 'Hazira CFS Terminal, Surat Export SEZ',
+          edi: 'ICEGATE 2.0 (Single Window System)',
+          phone: '+91 261 280 2000',
+          email: 'hazira.customs@icegate.gov.in',
+          def: 0
+        }
+      ];
+
+      for (const p of standardPorts) {
+        insPort.run(
+          tenantId, p.code, p.name, p.type, p.zone,
+          p.custodian, p.icegate, p.cfs, p.edi, p.phone, p.email, p.def
+        );
+      }
     }
 
     // Seed CHA Agencies Directory
