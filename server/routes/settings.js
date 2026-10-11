@@ -30,14 +30,26 @@ router.post('/', (req, res) => {
       }
     }
 
-    // Also update tenant table if business_type or store_name was modified
-    if (updates.business_type || updates.store_name) {
+    // Update tenant store profile columns (excluding business_type to maintain strict isolation)
+    if (updates.store_name || updates.store_address || updates.gstin || updates.phone || updates.dl_number || updates.fssai_number) {
       db.prepare(`
         UPDATE tenants SET
-          business_type = COALESCE(?, business_type),
-          name = COALESCE(?, name)
+          name = COALESCE(?, name),
+          store_address = COALESCE(?, store_address),
+          owner_phone = COALESCE(?, owner_phone),
+          gstin = COALESCE(?, gstin),
+          dl_number = COALESCE(?, dl_number),
+          fssai_number = COALESCE(?, fssai_number)
         WHERE id = ?
-      `).run(updates.business_type, updates.store_name, tenantId);
+      `).run(
+        updates.store_name ?? null,
+        updates.store_address ?? null,
+        updates.phone ?? null,
+        updates.gstin ?? null,
+        updates.dl_number || updates.dl_20b ?? null,
+        updates.fssai_number ?? null,
+        tenantId
+      );
     }
 
     const rows = db.prepare('SELECT key, value FROM settings WHERE tenant_id = ?').all(tenantId);
